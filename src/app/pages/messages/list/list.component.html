@@ -1,4 +1,15 @@
-<app-header title="Friends Chat" [back]="true"></app-header>
+<app-header title="Friends Chat" [back]="true">
+</app-header>
+
+  <ion-buttons slot="end">
+    <ion-button (click)="showMissedCalls()">
+      <ion-icon name="notifications-outline"></ion-icon>
+      <ion-badge *ngIf="missedCalls.length > 0" color="danger">
+        {{ missedCalls.length }}
+      </ion-badge>
+    </ion-button>
+  </ion-buttons>
+
 
 <ion-content>
   <app-loader *ngIf="pageLoading"></app-loader>

@@ -1,26 +1,26 @@
 <app-header title="Find New Friends">
   <div id="end-buttons">
-    <ion-button shape="round" (click)="presentSearchByModal()">
-      <i class="fas fa-filter"></i>
+    <ion-button fill="clear" shape="round" (click)="presentSearchByModal()">
+      <ion-icon name="filter" slot="icon-only" color="primary"></ion-icon>
     </ion-button>
   </div>
 </app-header>
 
-<ion-item>
-  <ion-label class="ml-2">Random</ion-label>
-  <ion-toggle [(ngModel)]="random" (ionChange)="toggleRandom()"></ion-toggle>
+<ion-item lines="none" class="mode-toggle">
+  <ion-label class="toggle-label">Random Discovery</ion-label>
+  <ion-toggle [(ngModel)]="random" (ionChange)="toggleRandom()" color="primary"></ion-toggle>
 </ion-item>
 
-<ion-content>
-  <app-loader *ngIf="pageLoading"></app-loader>
+<ion-content class="discovery-content">
+  <app-loader *ngIf="pageLoading" class="animated-loader"></app-loader>
 
   <ion-refresher *ngIf="!random" slot="fixed" pullFactor="0.5" pullMin="100" pullMax="200" (ionRefresh)="getNearUsers($event, true)">
-    <ion-refresher-content></ion-refresher-content>
+    <ion-refresher-content pullingIcon="lines" refreshingSpinner="crescent"></ion-refresher-content>
   </ion-refresher>
 
-  <div class="h-100" *ngIf="!pageLoading && users && users.length">
-    <ion-slides #slides *ngIf="random" class="h-100" pager="false" [options]="slideOpts">
-      <!-- Use `let last = last` to get the last item in the loop -->
+  <div class="discovery-container" *ngIf="!pageLoading && users && users.length">
+    <!-- Random Swipe Mode -->
+    <ion-slides #slides *ngIf="random" class="swipe-mode h-100" pager="false" [options]="slideOpts">
       <ion-slide class="h-100 swiper-no-swiping" *ngFor="let user of users; let last = last">
         <ng-container *ngIf="isUser(user)">
           <app-slide
@@ -35,45 +35,45 @@
       </ion-slide>
     </ion-slides>
 
-    <ion-row *ngIf="!random" class="p-2">
-      <ng-container *ngFor="let user of users">
-        <ion-col size="4" size-sm="3" size-md="2" *ngIf="isUser(user)">
-          <ion-item lines="none" (click)="showProfile(user.id)">
-            <div class="w-100">
-              <div class="photo-container overflow-hidden">
-                <img class="w-100" [src]="user.mainAvatar || user.avatar[0]" alt="Avatar">
+    <!-- Grid View Mode -->
+    <ion-grid *ngIf="!random" class="grid-mode">
+      <ion-row class="p-2">
+        <ng-container *ngFor="let user of users">
+          <ion-col size="4" size-sm="3" size-md="2" *ngIf="isUser(user)">
+            <ion-card class="user-card" (click)="showProfile(user.id)">
+              <div class="photo-container">
+                <img [src]="user.mainAvatar || user.avatar[0]" alt="Avatar">
+                <span class="status-bubble" [ngClass]="{'online': user.online, 'offline': !user.online}"></span>
               </div>
-              <div class="px-2 w-100 text-center pt-1">
-                <div class="d-flex align-items-center justify-content-center">
-                  <span
-                    class="user-status-indicator"
-                    [ngClass]="user.online ? 'user-online' : 'user-offline'"
-                    [title]="user.online ? 'Online' : 'Offline'">
-                  </span>
-                  <span>{{ user.firstName | resumeText: 12 }}{{ user.getAge(true) ? ', ' + user.getAge(true) : '' }}</span>
-                </div>
-              </div>
-            </div>
-          </ion-item>
-        </ion-col>
+              <ion-card-content class="user-info">
+                <h3>{{ user.firstName | resumeText: 12 }}</h3>
+                <p *ngIf="user.getAge(true)">{{ user.getAge(true) }} years</p>
+              </ion-card-content>
+            </ion-card>
+          </ion-col>
 
-        <ion-col size="12" *ngIf="!isUser(user) && authUser?.country">
-          <ion-item lines="none" class="text-center">
-            <ion-label color="primary" class="divider-label">
-              <ng-container *ngIf="!isGlobalSearch">
-              <h2>  Discover more friends from {{ authUser.country }}! 🌍</h2>
-              </ng-container>
-              <ng-container *ngIf="isGlobalSearch">
-                <h2>We couldn't find users in your country. Explore friends around the world! 🌍</h2>
-              </ng-container>
-            </ion-label>
-          </ion-item>
-        </ion-col>
-      </ng-container>
-    </ion-row>
+          <ion-col size="12" *ngIf="!isUser(user) && authUser?.country">
+            <ion-card class="discovery-message">
+              <ion-card-content>
+                <ion-icon name="globe" color="primary"></ion-icon>
+                <h2 *ngIf="!isGlobalSearch">Discover more friends from {{ authUser.country }}!</h2>
+                <h2 *ngIf="isGlobalSearch">We couldn't find users in your country. Explore friends around the world!</h2>
+              </ion-card-content>
+            </ion-card>
+          </ion-col>
+        </ng-container>
+      </ion-row>
+    </ion-grid>
+  </div>
+
+  <div class="empty-state" *ngIf="!pageLoading && (!users || !users.length)">
+    <ion-icon name="people-outline"></ion-icon>
+    <h2>No matches found</h2>
+    <p>Try adjusting your search filters or check back later</p>
+    <ion-button fill="outline" (click)="presentSearchByModal()">Adjust Filters</ion-button>
   </div>
 
   <ion-infinite-scroll #infinitScroll threshold="100px" (ionInfinite)="getNearUsers($event, false)">
-    <ion-infinite-scroll-content loadingSpinner="crescent" color="primary"></ion-infinite-scroll-content>
+    <ion-infinite-scroll-content loadingSpinner="bubbles" loadingText="Loading more connections..."></ion-infinite-scroll-content>
   </ion-infinite-scroll>
 </ion-content>

@@ -12,6 +12,7 @@ interface UserSubscription {
 
 
 export class User {
+
   public _id: string;
   private _firstName: string;
   private _lastName: string;
@@ -34,7 +35,7 @@ export class User {
   private _friend: boolean;
   private _request: RequestEnum | null;
   private _requests: Request[];
-  private _online: boolean;
+  public _online: boolean;
   private _messages: Message[];
   private _subscription: UserSubscription | null;
   private _randomVisible: boolean;
@@ -60,6 +61,8 @@ export class User {
   private _salt: string;
   private _hashed_password: string;
   private _lastSeen: Date | null;  // <-- New property added here
+  private _peerId: string | null;  // ✅ Add peerId property
+  public _lastSeenText: string | null;
 
   constructor(
     id: string = '',
@@ -110,6 +113,8 @@ export class User {
     salt: string = '',
     hashed_password: string = '',
     lastSeen: Date | null = null,  // <-- Initialize lastSeen here
+    peerId: string | null = null,  // ✅ Add peerId to constructor
+    lastSeenText: string | null = null,
 
   ) {
     this._id = id;
@@ -160,6 +165,8 @@ export class User {
     this._salt = salt;
     this._hashed_password = hashed_password;
     this._lastSeen = lastSeen;  // <-- Assign lastSeen here
+    this._peerId = peerId;  // ✅ Assign peerId
+    this._lastSeenText = lastSeenText;
 
   }
 
@@ -206,6 +213,27 @@ export class User {
   get loggedIn(): boolean { return this._loggedIn; }
   get visitProfile(): boolean { return this._visitProfile; }
 
+  get lastSeenText(): string | null { return this._lastSeenText; }
+  set lastSeenText(lastSeenText: string | null) { this._lastSeenText = lastSeenText; }
+  
+  
+  public getPeerId(): string | null {
+    return this._peerId;
+}
+
+  // ✅ Setter for peerId
+public setPeerId(peerId: string | null): void {
+    console.log(`🔄 Setting Peer ID: ${peerId}`);
+    this._peerId = peerId;
+}
+get peerId(): string | null {
+  return this._peerId;
+}
+
+// ✅ Setter for Peer ID
+set peerId(peerId: string | null) {
+  this._peerId = peerId;
+}
   // Setter methods
   set id(id: string) { this._id = id; }
   set firstName(firstName: string) { this._firstName = firstName; }
@@ -292,21 +320,23 @@ export class User {
     return this._id;
   }
 
+  
+
   public getAge(isLoggedInUser: boolean): number | null {
-    console.log('loggedIn:', isLoggedInUser);
-    console.log('ageVisible:', this._ageVisible);
-    console.log('birthDate:', this._birthDate);
+  //  console.log('loggedIn:', isLoggedInUser);
+  //  console.log('ageVisible:', this._ageVisible);
+   // console.log('birthDate:', this._birthDate);
 
     // If it's the logged-in user's profile, always return the age, otherwise check ageVisible
     if ((!this._ageVisible && !isLoggedInUser) || !this._birthDate) {
-        console.log('Returning null - either age is not visible or birth date is missing.');
+     ///   console.log('Returning null - either age is not visible or birth date is missing.');
         return null;
     }
 
     const today = new Date();
     const birthDate = new Date(this._birthDate);
-    console.log('Today\'s Date:', today);
-    console.log('Birth Date:', birthDate);
+ //   console.log('Today\'s Date:', today);
+  //  console.log('Birth Date:', birthDate);
 
     let age = today.getFullYear() - birthDate.getFullYear();
 
@@ -315,7 +345,7 @@ export class User {
         age--; // Adjust age if the birthday hasn't occurred yet this year
     }
 
-    console.log('Final Age:', age);
+   // console.log('Final Age:', age);
     return age;
 }
 
@@ -335,12 +365,13 @@ export class User {
   }
 
   initialize(user: any): User {
-    console.log('Initializing user:', user);
+   // console.log('Initializing user:', user);
 
     if (!user || typeof user !== 'object') {
       console.error('Invalid user data:', user);
       throw new Error('Invalid user data');
     }
+    console.log('⚠️ Received raw user data from backend:', user);
 
     this._id = user._id || '';
     this._firstName = user.firstName || '';
@@ -393,6 +424,11 @@ export class User {
     this._salt = user.salt || '';
     this._hashed_password = user.hashed_password || '';
     this._lastSeen = user.lastSeen ? new Date(user.lastSeen) : null;  // <-- Initialize lastSeen here
+    this._lastSeenText = user.lastSeenText || null;
+
+    this._peerId = user.peerId || null;  // ✅ Assign peerId
+    console.log('✅ After initialization, lastSeenText:', this.lastSeenText);
+    console.log('✅ After initialization, full User object:', this.toObject());
 
     if (!this._profileCreated) {
       this._profileCreated = true;
@@ -402,7 +438,7 @@ export class User {
       this.sortInterests();
     }
 
-    console.log('User initialized successfully:', this.toObject());
+    //('User initialized successfully:', this.toObject());
 
     return this;
   }
@@ -493,8 +529,11 @@ export class User {
       createdAt: this._createdAt,
       updatedAt: this._updatedAt,
       salt: this._salt,
+      peerId: this._peerId,  // ✅ Include peerId
       hashed_password: this._hashed_password,
-      aboutMe: this._aboutMe // Added aboutMe field
+      aboutMe: this._aboutMe, // Added aboutMe field
+      lastSeenText: this._lastSeenText,
+
     };
   }
 }

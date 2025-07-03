@@ -1,73 +1,131 @@
 <app-loader *ngIf="pageLoading"></app-loader>
 
-<ion-content color="dark" *ngIf="user">
-  <video
-    id="partner-video"
-    (click)="swapVideo('my-video')"
-    autoplay
-    playsinline
-    [ngClass]="{'second-video': topVideoFrame === 'partner-video', 'main-video': topVideoFrame != 'partner-video'}"
-    [class.d-none]="!answered"
-  ></video>
+<ion-content color="dark" class="video-container">
+  <!-- Loading overlay -->
+  <div *ngIf="!user || !partner" class="loading-overlay">
+    <ion-spinner></ion-spinner>
+    <div>Loading call interface...</div>
+  </div>
 
-  <video
-    id="my-video"
-    (click)="swapVideo('partner-video')"
-    autoplay
-    playsinline
-    [muted]="true"
-    [ngClass]="{'second-video': topVideoFrame === 'my-video', 'main-video': topVideoFrame != 'my-video'}"
-  ></video>
+  <!-- Main content -->
+  <ng-container *ngIf="user && partner">
+    <!-- Partner Video -->
+    <video
+      #partnerVideo
+      id="partner-video"
+      (click)="swapVideo('my-video')"
+      autoplay
+      playsinline
+      webkit-playsinline
+      preload="auto"
+      x-webkit-airplay="allow"
+      [ngClass]="{'second-video': topVideoFrame === 'partner-video', 'main-video': topVideoFrame !== 'partner-video'}"
+      [class.hidden]="!answered"
+      (error)="handleVideoError('partner')">
+    </video>
 
-  <div class="call-info pb-3" *ngIf="!answered">
-    <div>
-      <div class="w-100 mt-3 d-flex justify-content-center">
-        <ion-avatar>
-          <img [src]="partner?.mainAvatar" alt="">
-        </ion-avatar>
-      </div>
-      <div class="w-100 text-center mt-2">
-        <span class="d-block user-name">{{ partner?.fullName }}</span>
-        <span class="d-block">Calling ...</span>
+    <!-- My Video -->
+    <video
+      #myVideo
+      id="my-video"
+      (click)="swapVideo('partner-video')"
+      autoplay
+      playsinline
+      webkit-playsinline
+      muted
+      preload="auto"
+      [ngClass]="{'second-video': topVideoFrame === 'my-video', 'main-video': topVideoFrame !== 'my-video'}"
+      (error)="handleVideoError('local')">
+    </video>
+
+    <!-- Call Duration -->
+    <div class="call-duration" *ngIf="answered">
+      {{ callDuration }}
+    </div>
+
+    <!-- Call Info -->
+    <div class="call-info" *ngIf="!answered">
+      <ion-avatar>
+        <img [src]="partner?.mainAvatar || 'assets/default-avatar.png'" 
+             [alt]="partner?.fullName"
+             (error)="partner.mainAvatar = 'assets/default-avatar.png'">
+      </ion-avatar>
+      <div class="user-name">{{ partner?.fullName }}</div>
+      <div class="call-status">
+        <span *ngIf="!answer">📞 Calling...</span>
+        <span *ngIf="answer">📲 Incoming Call</span>
       </div>
     </div>
-  </div>
 
-  <div class="buttons-div w-100 mb-3">
-    <ion-row class="mb-4">
-      <ion-col [size]="answer && !answered ? '6' : '12'" class="d-flex justify-content-center">
-        <ion-fab-button [disabled]="!myEl || !myEl.srcObject" (click)="closeCall()" color="danger">
-          <i class="fas fa-phone-slash"></i>
+    <!-- Controls -->
+    <div class="controls-container">
+      <div class="button-row">
+        <!-- Answer -->
+        <ion-fab-button 
+          *ngIf="answer && !answered" 
+          class="control-button" 
+          color="success" 
+          (click)="answerCall()"
+          [disabled]="answeringCall"
+          aria-label="Answer call">
+          <ion-spinner *ngIf="answeringCall"></ion-spinner>
+          <i *ngIf="!answeringCall" class="fas fa-phone"></i>
         </ion-fab-button>
-      </ion-col>
-      
-      <ion-col *ngIf="answer && !answered" size="6" class="d-flex justify-content-center">
-        <ion-fab-button (click)="answerCall()" color="success">
-          <i class="fas fa-phone"></i>
+
+        <!-- Start Call -->
+        <ion-fab-button 
+          *ngIf="!answered && !answer" 
+          class="control-button" 
+          color="primary" 
+          (click)="call()"
+          [disabled]="startingCall"
+          aria-label="Start call">
+          <ion-spinner *ngIf="startingCall"></ion-spinner>
+          <i *ngIf="!startingCall" class="fas fa-video"></i>
         </ion-fab-button>
-      </ion-col>
-    </ion-row>
-    <ion-row *ngIf="answered || !answer">
-      <ion-col size="6" class="d-flex justify-content-center">
-        <ion-fab-button (click)="toggleAudio()" [color]="audioEnabled ? 'light' : 'danger'">
-          <span *ngIf="audioEnabled">
-            <i class="fas fa-microphone"></i>
-          </span>
-          <span *ngIf="!audioEnabled">
-            <i class="fas fa-microphone-slash"></i>
-          </span>
+
+        <!-- End Call -->
+        <ion-fab-button 
+          class="control-button" 
+          color="danger" 
+          (click)="closeCall()" 
+          [disabled]="!myEl?.srcObject || endingCall"
+          aria-label="End call">
+          <ion-spinner *ngIf="endingCall"></ion-spinner>
+          <i *ngIf="!endingCall" class="fas fa-phone-slash"></i>
         </ion-fab-button>
-      </ion-col>
-      <ion-col size="6" class="d-flex justify-content-center">
-        <ion-fab-button (click)="toggleCamera()" [color]="cameraEnabled ? 'light' : 'danger'">
-          <span *ngIf="cameraEnabled">
-            <i class="fas fa-video"></i>
-          </span>
-          <span *ngIf="!cameraEnabled">
-            <i class="fas fa-video-slash"></i>
-          </span>
+      </div>
+
+      <div class="button-row" *ngIf="answered || !answer">
+        <!-- Audio Toggle -->
+        <ion-fab-button 
+          class="control-button" 
+          [color]="audioEnabled ? 'light' : 'danger'" 
+          (click)="toggleAudio()"
+          aria-label="Toggle microphone">
+          <i class="fas" [ngClass]="{'fa-microphone': audioEnabled, 'fa-microphone-slash': !audioEnabled}"></i>
         </ion-fab-button>
-      </ion-col>
-    </ion-row>
-  </div>
+
+        <!-- Camera Toggle -->
+        <ion-fab-button 
+          class="control-button" 
+          [color]="cameraEnabled ? 'light' : 'danger'" 
+          (click)="toggleCamera()"
+          aria-label="Toggle camera">
+          <i class="fas" [ngClass]="{'fa-video': cameraEnabled, 'fa-video-slash': !cameraEnabled}"></i>
+        </ion-fab-button>
+
+        <!-- Switch Camera -->
+        <ion-fab-button 
+          class="control-button" 
+          color="light" 
+          (click)="toggleCameraDirection()"
+          aria-label="Switch camera"
+          [disabled]="switchingCamera">
+          <ion-spinner *ngIf="switchingCamera"></ion-spinner>
+          <i *ngIf="!switchingCamera" class="fas fa-sync-alt"></i>
+        </ion-fab-button>
+      </div>
+    </div>
+  </ng-container>
 </ion-content>

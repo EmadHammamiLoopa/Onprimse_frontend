@@ -23,7 +23,7 @@ export class AuthService extends DataService {
     private ngZone: NgZone // Added NgZone
   ) {
     super('auth/', nativeStorage, http, httpClient, router, platform);
-    this.loadGoogleAuthLibrary(); // Load Google Auth Library
+  //  this.loadGoogleAuthLibrary(); // Load Google Auth Library
   }
 
   private loadGoogleAuthLibrary() {

@@ -100,23 +100,23 @@ circle:first-child {
   color: #fff;
   font-weight: bold;
 }
-
-
-
+/* Custom Popover container */
 /* Custom Popover container */
 .custom-popover {
   position: absolute;
-  top: 35px;
-  right: 0;
-  background-color: #fff;
+  top: 0; /* Start from the top of the post */
+  left: 0; /* Start from the left of the post */
+  width: 50%; /* Extend to the full width of the post */
+  height: 72%; /* Extend to the full height of the post */
+  background-color: #fff; /* Background color for the popover */
   border-radius: 12px; /* Smooth rounded corners */
   box-shadow: 0 8px 16px rgba(0, 0, 0, 0.15); /* Softer and more prominent shadow */
-  z-index: 1000;
+  z-index: 1000; /* Ensure it's above other elements */
   opacity: 0;
   transform: translateY(-10px);
   transition: opacity 0.3s ease, transform 0.3s ease, visibility 0.3s ease;
-  width: 200px; /* More width to fit longer text */
   visibility: hidden; /* Initially hidden */
+  overflow-y: auto; /* Add scrollbar when content overflows */
 }
 
 /* Show the popover */
@@ -128,37 +128,33 @@ circle:first-child {
 
 /* Dropdown Items */
 .visibility-dropdown ion-item {
-  padding: 10px 10px; /* Larger padding for more spacing */
-  font-size: 15px; /* Slightly bigger font size */
+  padding: 7px 4px;
+  font-size: 10px;
   transition: background-color 0.3s ease, color 0.3s ease;
   display: flex;
-  align-items: center; /* Align icons and text */
-  border-bottom: 1px solid #eee; /* Subtle bottom border between items */
+  align-items: center;
+  border-bottom: 1px solid #eee;
 }
 
-/* Last item without bottom border */
 .visibility-dropdown ion-item:last-child {
   border-bottom: none;
 }
 
-/* Hover effect */
 .visibility-dropdown ion-item:hover {
-  background-color: #f7f7f7; /* Light gray hover background */
-  color: #333; /* Darker text on hover */
+  background-color: #f7f7f7;
+  color: #333;
 }
 
-/* Icon Styling */
 .visibility-dropdown ion-icon {
   color: #666;
-  font-size: 10px;
-  margin-right: 12px; /* Ensure enough space between icon and text */
+  font-size: 14px;
+  margin-right: 12px;
 }
 
-/* Label Styling */
 .visibility-dropdown ion-label {
-  font-size: 15px;
-  color: #333; /* Darker and more readable text */
-  font-weight: 500; /* Medium weight for better readability */
+  font-size: 16px;
+  color: #333;
+  font-weight: 500;
 }
 
 /* Add smooth animations */
@@ -174,16 +170,4 @@ circle:first-child {
 .custom-popover.hide {
   opacity: 0;
   transform: translateY(-10px);
-}
-
-/* Smooth hover transition for icons */
-.visibility-dropdown ion-icon:hover {
-  transform: scale(1.1); /* Slightly increase icon size on hover */
-  transition: transform 0.2s ease-in-out;
-}
-
-/* Add padding to the dropdown */
-.visibility-dropdown {
-  padding: 10px 0;
-  border-radius: 8px;
 }

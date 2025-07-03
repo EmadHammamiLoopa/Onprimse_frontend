@@ -69,3 +69,53 @@ ion-infinite-scroll-content {
 margin-left: 5%;
 
 }
+
+ion-button {
+  position: relative;
+
+  ion-badge {
+    position: absolute;
+    top: -5px;
+    right: -5px;
+    font-size: 12px;
+    min-width: 18px;
+    height: 18px;
+    padding: 3px;
+    text-align: center;
+    border-radius: 50%;
+  }
+
+  ion-icon {
+    font-size: 22px;
+    color: var(--ion-color-primary);
+  }
+}
+.missed-call-alert-button {
+  display: flex;
+  align-items: center;
+  padding: 12px;
+  
+  ion-icon {
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    margin-right: 12px;
+    object-fit: cover;
+  }
+  
+  .alert-button-inner {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    
+    .alert-sub-header {
+      font-size: 0.8rem;
+      color: var(--ion-color-medium);
+    }
+    
+    .alert-sub-text {
+      font-size: 0.7rem;
+      color: var(--ion-color-medium-shade);
+    }
+  }
+}

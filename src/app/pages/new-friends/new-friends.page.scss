@@ -1,66 +1,150 @@
-.photo-container {
-  position: relative;
-  width: 100%; /* The size you want */
+/* Enhanced Styles */
+.discovery-content {
+  --background: #f8f9fa;
+  --padding-top: 10px;
 }
 
-.photo-container:after {
-  content: "";
-  display: block;
-  padding-bottom: 100%; /* The padding depends on the width, not on the height, so with a padding-bottom of 100% you will get a square */
+.mode-toggle {
+  --background: transparent;
+  --padding-start: 16px;
+  --padding-end: 16px;
+  
+  .toggle-label {
+    font-weight: 500;
+    color: var(--ion-color-dark);
+  }
+  
+  ion-toggle {
+    padding-right: 8px;
+  }
 }
 
-.photo-container img  {
-  position: absolute; /* Take your picture out of the flow */
-  top: 0;
-  bottom: 0;
-  left: 0;
-  right: 0; /* Make the picture taking the size of it's parent */
-  width: 100%; /* This if for the object-fit */
-  height: 100%; /* This if for the object-fit */
-  object-fit: cover; /* Equivalent of the background-size: cover; of a background-image */
-  object-position: center;
-  border-radius: 50%;
-  border: 1px solid #bbb;
+/* Grid Mode Enhancements */
+.grid-mode {
+  .user-card {
+    margin: 0;
+    border-radius: 12px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+    transition: transform 0.2s ease;
+    
+    &:active {
+      transform: scale(0.98);
+    }
+    
+    .photo-container {
+      position: relative;
+      width: 100%;
+      padding-top: 100%; /* 1:1 Aspect Ratio */
+      
+      img {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+        border-radius: 12px 12px 0 0;
+      }
+      
+      .status-bubble {
+        position: absolute;
+        bottom: 8px;
+        right: 8px;
+        width: 12px;
+        height: 12px;
+        border-radius: 50%;
+        border: 2px solid white;
+        
+        &.online {
+          background: var(--ion-color-success);
+        }
+        
+        &.offline {
+          background: var(--ion-color-medium);
+        }
+      }
+    }
+    
+    .user-info {
+      padding: 10px;
+      text-align: center;
+      
+      h3 {
+        margin: 0;
+        font-size: 0.9rem;
+        color: var(--ion-color-dark);
+        font-weight: 500;
+      }
+      
+      p {
+        margin: 4px 0 0;
+        font-size: 0.8rem;
+        color: var(--ion-color-medium);
+      }
+    }
+  }
+  
+  .discovery-message {
+    text-align: center;
+    background: rgba(var(--ion-color-primary-rgb), 0.05);
+    
+    ion-card-content {
+      padding: 16px;
+      
+      ion-icon {
+        font-size: 2rem;
+        margin-bottom: 8px;
+      }
+      
+      h2 {
+        color: var(--ion-color-primary);
+        margin: 0;
+        font-size: 1rem;
+        
+        @media (min-width: 768px) {
+          font-size: 1.2rem;
+        }
+      }
+    }
+  }
 }
 
-.photo-container:hover{
-  filter: brightness(80%);
+/* Empty State */
+.empty-state {
+  text-align: center;
+  padding: 40px 20px;
+  height: 60vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  
+  ion-icon {
+    font-size: 3rem;
+    color: var(--ion-color-medium);
+    opacity: 0.5;
+    margin-bottom: 15px;
+  }
+  
+  h2 {
+    color: var(--ion-color-dark);
+    margin: 0 0 8px;
+    font-size: 1.2rem;
+  }
+  
+  p {
+    color: var(--ion-color-medium);
+    margin: 0 0 20px;
+    font-size: 0.9rem;
+  }
 }
 
-.info-container{
-  position: absolute;
-  bottom: 0px;
-  background-color: rgba(0, 0, 0, 0.4);
-  color: white;
+/* Animation */
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
 }
 
-.online-icon{
-  font-size: 10px;
-}
-
-.tab-button.selected{
-  border-bottom:2px solid var(--ion-color-primary)!important;
-}
-.divider-label {
-  font-weight: bold;
-  font-size: 1.2rem;
-  text-transform: uppercase;
-  margin: 20px 0;
-  color: #3880ff; /* Adjust color as needed */
-}
-
-.user-status-indicator {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  display: inline-block;
-  margin-right: 5px;
-}
-
-.user-online {
-  background-color: green;
-}
-
-.user-offline {
-  background-color: grey;
+.animated-loader {
+  animation: fadeIn 0.3s ease-out;
 }

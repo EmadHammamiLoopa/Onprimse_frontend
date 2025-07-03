@@ -1,8 +1,9 @@
+import { SafeUrl } from '@angular/platform-browser';
 import constants from '../helpers/constants';
 import { Product } from './Product';
 
 export class Message {
-  private _id: string;
+  public _id: string;
   private _from: string;
   private _to: string;
   private _text: string;
@@ -12,6 +13,7 @@ export class Message {
   private _type: string;
   public productId?: string; // Property to store product ID
   public product?: Product; // Property to store product details
+  public   safeImage?: SafeUrl;   // sanitized image
 
   constructor() {}
 
@@ -83,10 +85,31 @@ export class Message {
   set createdAt(createdAt: Date) {
     this._createdAt = createdAt;
   }
-  set image(image: string) {
-    if (!image || image === 'undefined') this._image = null;
-    else this._image = (!image.includes(constants.DOMAIN_URL) ? constants.DOMAIN_URL : '') + image;
+  set image(image: any) {
+    if (!image || image === 'undefined' || image === 'null') {
+      this._image = null;
+  
+    } else if (typeof image === 'string') {
+      if (image.startsWith('data:image/')) {
+        // ✅ Keep base64 images as-is
+        this._image = image;
+      } else if (image.startsWith('http')) {
+        // ✅ Already a valid URL
+        this._image = image;
+      } else {
+        // ✅ Relative path from backend
+        this._image = constants.DOMAIN_URL + image;
+      }
+  
+    } else if (typeof image === 'object' && image.path) {
+      this._image = constants.DOMAIN_URL + image.path;
+  
+    } else {
+      this._image = null;
+    }
   }
+  
+  
   set type(type: string) {
     this._type = type;
   }

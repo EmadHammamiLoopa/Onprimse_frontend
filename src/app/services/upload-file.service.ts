@@ -1,13 +1,14 @@
 import { Injectable } from '@angular/core';
-import { FileEntry } from '@ionic-native/file/ngx';
 import { FilePath } from '@ionic-native/file-path/ngx';
 import { Platform } from '@ionic/angular';
-import { Camera, CameraOptions, PictureSourceType } from '@ionic-native/camera/ngx';
+import { Camera, CameraOptions, PictureSourceType, MediaType } from '@ionic-native/camera/ngx';
 import { AndroidPermissions } from '@ionic-native/android-permissions/ngx';
 import { PermissionService } from './permission.service';
 import { MockCordovaService } from './mock-cordova.service';
 import { Observable } from 'rxjs';
 import { HttpClient } from '@angular/common/http';
+import constants from '../helpers/constants';
+import { environment } from 'src/environments/environment';
 
 @Injectable({
   providedIn: 'root'
@@ -24,17 +25,16 @@ export class UploadFileService {
     private http: HttpClient
   ) {}
 
-  takePicture(sourceType: number): Promise<string> {
+    private apiUrl = `${environment.apiUrl}/user`;
+  
+  takeMedia(sourceType: number, mediaType: 'image' | 'video'): Promise<{ filePath: string, mediaType: string }> {
     const destinationType = this.camera.DestinationType.NATIVE_URI;
-
     const options: CameraOptions = {
       quality: 75,
       destinationType,
       encodingType: this.camera.EncodingType.JPEG,
-      mediaType: this.camera.MediaType.PICTURE,
+      mediaType: (mediaType === 'video') ? this.camera.MediaType.VIDEO : this.camera.MediaType.PICTURE,
       sourceType,
-      targetWidth: 1024,
-      targetHeight: 1024,
       allowEdit: false,
       saveToPhotoAlbum: false,
       correctOrientation: true,
@@ -42,42 +42,80 @@ export class UploadFileService {
 
     return this.platform.ready().then(() => {
       if (!this.platform.is('cordova')) {
+        // Browser fallback
         return this.mockCordovaService.getPicture({ sourceType });
       }
 
       return new Promise((resolve, reject) => {
-        this.permissionService.getPermission(sourceType === PictureSourceType.CAMERA ? this.androidPermission.PERMISSION.CAMERA : this.androidPermission.PERMISSION.READ_EXTERNAL_STORAGE)
+        const permission = sourceType === PictureSourceType.CAMERA 
+            ? this.androidPermission.PERMISSION.CAMERA 
+            : this.androidPermission.PERMISSION.READ_EXTERNAL_STORAGE;
+
+        this.permissionService.getPermission(permission)
           .then(() => {
             this.camera.getPicture(options)
-              .then((imageData) => {
+              .then((mediaUri) => {
                 if (this.platform.is('android') && sourceType === PictureSourceType.PHOTOLIBRARY) {
-                  this.filePath.resolveNativePath(imageData)
-                    .then(filePath => {
-                      resolve(filePath);
-                    }).catch(err => {
-                      reject(err);
-                    });
+                  this.filePath.resolveNativePath(mediaUri)
+                    .then(filePath => resolve({ filePath, mediaType }))
+                    .catch(err => reject(err));
                 } else {
-                  resolve(imageData);
+                  resolve({ filePath: mediaUri, mediaType });
                 }
-              }).catch(err => {
-                reject(err);
-              });
-          }).catch(err => {
-            reject(err);
-          });
+              }).catch(err => reject(err));
+          }).catch(err => reject(err));
       });
     });
   }
 
-  getPicturesFromBrowser(): Promise<string[]> {
-    return this.mockCordovaService.getMultiplePictures();
+  // Browser file picker
+  getFileFromBrowser(): Promise<File> {
+    return new Promise((resolve, reject) => {
+      const input = document.createElement('input');
+      input.type = 'file';
+      input.accept = 'image/*,video/*';
+      input.onchange = () => {
+        const file = input.files[0];
+        if (file) resolve(file);
+        else reject('No file selected');
+      };
+      input.click();
+    });
   }
 
+  
   upload(file: File, userId: string): Observable<any> {
+    const maxSizeMB = 20;
+    if (file.size > maxSizeMB * 1024 * 1024) {
+      throw new Error(`File exceeds ${maxSizeMB} MB limit.`);
+    }
     const formData = new FormData();
-    formData.append('avatars', file); // Ensure the field name matches the backend expectation
+    formData.append('upload', file);
+    return this.http.post(`${this.apiUrl}/${userId}/upload`, formData);
 
-    return this.http.put(`http://127.0.0.1:3300/api/v1/user/${userId}/avatar`, formData);
+
+    }
+
+  takePicture(sourceType: number, mediaType: 'image' | 'video' = 'image'): Promise<any> {
+    const mediaTypeValue = (mediaType === 'image') 
+      ? this.camera.MediaType.PICTURE 
+      : this.camera.MediaType.VIDEO;
+
+    const options: CameraOptions = {
+      quality: 75,
+      destinationType: this.camera.DestinationType.FILE_URI,
+      mediaType: mediaTypeValue,
+      sourceType: sourceType,
+      saveToPhotoAlbum: false,
+      correctOrientation: true
+    };
+
+    return this.camera.getPicture(options).then(imageData => {
+      return {
+        imageData: imageData,
+        file: null, // you can extend this if needed for file processing
+        name: imageData.substring(imageData.lastIndexOf('/') + 1)
+      };
+    });
   }
 }

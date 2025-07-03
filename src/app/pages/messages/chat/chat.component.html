@@ -1,136 +1,218 @@
-<app-header
-  [title]="user?.fullName || ''"
-  [back]="true"
-  [avatar]="!!user"
-  [avatarSrc]="user?.getMainAvatar() || null"
-  [reverseColors]="true"
-  (titleClicked)="showUserProfile()"
->
-<div id="end-buttons" *ngIf="!business">
-  <ion-buttons slot="end">
-    <!-- Show request video call button for non-friends -->
-    <ion-button *ngIf="!user?.isFriend" (click)="requestVideoCall()" shape="round">
-      <i class="fas fa-video"></i> Request
-    </ion-button>
+<ion-header class="chat-header animated-gradient">
+  <ion-toolbar>
 
-    <!-- Show start video call button for friends -->
-    <ion-button *ngIf="user?.isFriend" [routerLink]="['/messages/video', user?.id]" shape="round">
-      <i class="fas fa-video"></i>
-    </ion-button>
-  </ion-buttons>
-</div>
+    <!-- Back Button -->
+    <ion-buttons slot="start">
+      <ion-button fill="clear" (click)="goBack()" class="back-button">
+        <ion-icon name="chevron-back" class="hover-scale"></ion-icon>
+      </ion-button>
+    </ion-buttons>
 
-</app-header>
+    <!-- User info -->
+    <div class="user-info" (click)="showUserProfile()">
+      <ion-avatar class="user-avatar pulse-online" *ngIf="user?.getMainAvatar()">
+        <img [src]="user?.getMainAvatar()" alt="Profile" />
+        <div *ngIf="user?.online" class="online-badge"></div>
+      </ion-avatar>
+
+      <div class="user-text">
+        <h2 class="user-name">{{ user?.fullName }}</h2>
+        <p class="user-status">
+          <span *ngIf="user?.online" class="online">Online</span>
+          <span *ngIf="!user?.online" class="offline">
+            Last seen {{ user?.lastSeenText }}
+          </span>
+        </p>
+      </div>
+    </div>
+
+    <!-- Video call buttons -->
+    <ion-buttons slot="end">
+      <ion-button *ngIf="!user?.isFriend && canRequestVideoCall()" (click)="requestVideoCall()" shape="round" fill="clear" class="video-button hover-pop pulse-icon" style="position: relative;">
+        <ion-icon name="videocam-outline" size="large"></ion-icon>
+        <div style="
+          position: absolute;
+          top: 2px;
+          right: 2px;
+          background: var(--ion-color-danger);
+          color: white;
+          font-size: 10px;
+          border-radius: 50%;
+          width: 16px;
+          height: 16px;
+          display: flex;
+          justify-content: center;
+          align-items: center;
+        ">?</div>
+      </ion-button>
+
+      <ion-button *ngIf="user?.isFriend" [routerLink]="['/messages/video', user?.id]" shape="round" fill="clear" class="video-button hover-pop">
+        <ion-icon name="videocam"></ion-icon>
+      </ion-button>
+    </ion-buttons>
+
+  </ion-toolbar>
+</ion-header>
+
 
 <app-loader *ngIf="pageLoading"></app-loader>
 
-<!-- Display product details if the chat is related to a product -->
-<ion-card *ngIf="product" (click)="showUproduct()">
+<!-- Product card -->
+<ion-card *ngIf="product" (click)="showUproduct()" class="product-card">
   <ion-row>
     <ion-col size="4">
       <ion-img [src]="getProductImage(product)" class="product-image"></ion-img>
     </ion-col>
     <ion-col size="8">
       <ion-card-header>
-        <ion-card-title>{{ product?.label }}</ion-card-title>
-        <ion-card-subtitle>{{ product?.price | currency:product?.currency }}</ion-card-subtitle>
+        <ion-card-title class="product-title">{{ product?.label }}</ion-card-title>
+        <ion-card-subtitle class="product-price">{{ product?.price | currency:product?.currency }}</ion-card-subtitle>
       </ion-card-header>
-      <ion-card-content>
+      <ion-card-content class="product-description">
         {{ product?.description }}
       </ion-card-content>
     </ion-col>
   </ion-row>
 </ion-card>
 
-<ion-content #content>
-  <ion-infinite-scroll #infScroll position="top" (ionInfinite)="getMessages($event)">
+<ion-content #content class="chat-content">
+  <ion-infinite-scroll #infScroll position="top" (ionInfinite)="getMessages($event)"
+    [disabled]="infScroll.disabled || pageLoading">
     <ion-infinite-scroll-content
       loadingSpinner="crescent"
-      loadingText="Loading more messages ...">
+      loadingText="Loading more messages...">
     </ion-infinite-scroll-content>
   </ion-infinite-scroll>
 
-  <ion-list *ngIf="authUser && user">
-    <div *ngFor="let message of messages; let ind = index" class="my-2">
-
-      <ion-row size="12" class="w-100 text-center mb-2" *ngIf="allowToShowDate(ind)">
-        <ion-col>{{ message?.createdAt | extractDate }}</ion-col>
-      </ion-row>
-
-      <ion-item lines="none" class="message">
-        <ion-row class="mx-2 w-100">
-          <ion-col
-            [class]="[message?.isMine(authUser?.id) ? 'my-message' : 'his-message']"
-            [class.failed]="message?.state === 'failed'"
-            class="p-2"
-            size="auto"
-          >
-            <div class="w-100 position-relative">
-              <img class="image" *ngIf="message?.image" [src]="message?.image" alt="">
-              <div [class.absolute]="!message?.text && message?.image" class="w-100 text-wrap">
-                <ion-text class="d-block">
-                  {{ message?.text }}
-                  <small class="pt-2 ml-2 float-right">
-                    <span>{{ message?.createdAt | extractTime }}</span>
-                    <span *ngIf="message?.state === ''"><i class="far fa-clock ml-2"></i></span>
-                    <span *ngIf="message?.state === 'sent'"><i class="fas fa-check ml-2"></i></span>
-                  </small>
-                </ion-text>
-
-                <ion-text class="d-block" *ngIf="message?.type === 'video-call-request'">
-                  <i class="fas fa-video"></i> {{ message?.text }}
-                  <small class="pt-2 ml-2 float-right">
-                    <span>{{ message?.createdAt | extractTime }}</span>
-                  </small>
-                </ion-text>
-                
+  <div class="messages-container">
+    <ng-container *ngFor="let group of groupedMessages">
+      <!-- Date separator -->
+      <div class="date-separator">
+        <span>{{ group.date }}</span>
+      </div>
+      
+      <!-- Messages in this group -->
+      <div *ngFor="let message of group.messages" class="message-wrapper">
+        <div class="message-bubble" 
+             [class.my-message]="message?.isMine(authUser?.id)"
+             [class.their-message]="!message?.isMine(authUser?.id)"
+             [class.failed]="message?.state === 'failed'">
+          
+          <!-- Image message -->
+          <img *ngIf="message?.image" [src]="message?.image" class="message-image">
+          
+          <!-- Text content -->
+          <div class="message-text" *ngIf="message?.text">
+            {{ message?.text }}
+          </div>
+          
+          <!-- Video call request -->
+          <div *ngIf="message?.type === 'video-call-request'">
+  
+            <!-- IF message sent by me -->
+            <div *ngIf="message?.from === authUser?.id" class="video-call-request improved-request">
+              <ion-icon name="videocam" class="video-icon"></ion-icon>
+              <div class="request-text">
+                <strong>Video Call Request</strong><br />
+                {{ message?.text }}
               </div>
             </div>
-          </ion-col>
-        </ion-row>
-        <ion-button
-          color="dark"
-          fill="clear"
-          shape="round"
-          [disabled]="resend.includes(message?.id)"
-          *ngIf="message?.state === 'failed'"
-          (click)="resendMessage(message)"
-        >
-          <span *ngIf="resend.includes(message?.id)"><i class="fas fa-circle-notch fa-spin"></i></span>
-          <span *ngIf="!resend.includes(message?.id)"><i class="fas fa-sync-alt"></i></span>
-        </ion-button>
-      </ion-item>
-    </div>
-    <div class="w-100 text-center text-danger px-4" *ngIf="messages && !conversationStarted()">
-      You can't send more messages until '{{ user?.fullName }}' responded
-    </div>
-    <div class="w-100 text-center text-danger px-4 mt-3" *ngIf="user && messages && !nonFriendsChatEnabled()">
-      You have reached the limit messages for non-friends, you should be a friend of {{ user?.firstName }} to continue chatting with {{ user?.gender === 'male' ? 'him' : 'her' }}
-    </div>
-  </ion-list>
+          
+            <!-- IF message received -->
+            <div *ngIf="message?.from !== authUser?.id" class="video-call-request fancy-request">
+              <div class="video-icon-container">
+                <ion-icon name="videocam" class="video-icon pulse"></ion-icon>
+              </div>
+              <div class="request-text">
+                <strong>Incoming Video Call</strong><br />
+                {{ message?.text }}
+                <div class="action-buttons">
+                  <ion-button fill="outline" size="small" color="success" (click)="acceptVideoCall(message)">
+                    Accept
+                  </ion-button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          
+          <!-- Message metadata -->
+          <div class="message-meta">
+            <span class="message-time">{{ formatMessageTime(message.createdAt) }}</span>
+            <span *ngIf="message?.state === 'sending'" class="message-status">
+              <ion-spinner name="dots"></ion-spinner>
+            </span>
+            <span *ngIf="message?.state === 'sent'" class="message-status">
+              <ion-icon name="checkmark-done"></ion-icon>
+            </span>
+          </div>
+          
+          <!-- Resend button for failed messages -->
+          <ion-button *ngIf="message?.state === 'failed'" 
+                      fill="clear" 
+                      size="small" 
+                      class="resend-button"
+                      (click)="resendMessage(message)">
+            <ion-icon name="refresh"></ion-icon>
+          </ion-button>
+        </div>
+      </div>
+    </ng-container>
+  </div>
+
+  <!-- Chat limits messages -->
+  <div class="chat-limits" *ngIf="messages && !conversationStarted()">
+    You can't send more messages until '{{ user?.fullName }}' responds
+  </div>
+  <div class="chat-limits" *ngIf="user && messages && !nonFriendsChatEnabled()">
+    You have reached the message limit for non-friends
+  </div>
 </ion-content>
 
-<ion-footer class="bg-danger ion-no-padding ion-no-margin">
-  <ion-item lines="none">
-    <ion-buttons class="ion-no-margin" slot="start">
-      <ion-button (click)="pickImage()" size="large" shape="round">
-        <i class="fas fa-camera"></i>
+<ion-footer class="message-input-footer">
+  <ion-toolbar>
+    <ion-item lines="none" class="input-container">
+      
+      <!-- Toggle + Button -->
+      <ion-button slot="start" fill="clear" (click)="toggleMediaOptions()" class="camera-button">
+        <ion-icon name="add"></ion-icon>
       </ion-button>
-    </ion-buttons>
 
-    <ion-input
-      (keydown.enter)="addMessage()"
-      (ionFocus)="scrollToBottom()"
-      [(ngModel)]="messageText"
-      [disabled]="!conversationStarted() || !nonFriendsChatEnabled()"
-      class="mx-2 chat-input"
-      placeholder="Type your message here"
-    ></ion-input>
+      <!-- Conditionally shown media options -->
+      <div *ngIf="showMediaOptions" class="media-options">
+        <ion-button fill="clear" (click)="pickMedia('image')" class="camera-button">
+          <ion-icon name="camera"></ion-icon>
+        </ion-button>
 
-    <ion-buttons class="ion-no-margin py-2" slot="end">
-      <ion-button (click)="addMessage()" shape="round" fill="clear" color="secondary">
-        <ion-icon name="send-outline"></ion-icon>
+        <ion-button fill="clear" (click)="pickMedia('video')" class="camera-button">
+          <ion-icon name="videocam"></ion-icon>
+        </ion-button>
+      </div>
+
+      <!-- Message Input -->
+      <ion-input
+        [(ngModel)]="messageText"
+        (keyup.enter)="addMessage()"
+        [disabled]="!conversationStarted() || !nonFriendsChatEnabled()"
+        placeholder="Type a message"
+        class="message-input">
+      </ion-input>
+
+      <!-- Image Preview -->
+      <div *ngIf="image" class="image-preview">
+        <img [src]="image" alt="Preview" style="max-height: 150px;">
+        <ion-button fill="clear" size="small" color="danger" (click)="removeImage()">
+          <ion-icon name="close-circle"></ion-icon>
+        </ion-button>
+      </div>
+
+      <!-- Send Button -->
+      <ion-button slot="end" fill="clear" (click)="addMessage()"
+        [disabled]="!messageText && !image"
+        class="send-button">
+        <ion-icon name="send"></ion-icon>
       </ion-button>
-    </ion-buttons>
-  </ion-item>
+
+    </ion-item>
+  </ion-toolbar>
 </ion-footer>

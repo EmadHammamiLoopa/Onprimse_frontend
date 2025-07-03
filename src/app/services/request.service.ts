@@ -21,12 +21,18 @@ export class RequestService extends DataService {
     })
   }
 
-  requests(page: number){
+  async requests(page: number) {
+    const token = await this.getToken();
+    if (!token) {
+      console.warn("No token found, skipping request."); // ✅ Prevents request if user isn't logged in
+      return Promise.resolve(null);
+    }
+  
     return this.sendRequest({
       method: 'get',
       url: '/requests',
-      data: {page: page.toString()
-    }})
+      params: { page: page.toString() },
+    });
   }
 
   acceptRequest(id: string) {

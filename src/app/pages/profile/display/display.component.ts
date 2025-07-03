@@ -126,6 +126,100 @@ export class DisplayComponent implements OnInit {
     }
   }
   
+  private processSelectedMedia(resp: any) {
+    let imageUrl = resp.imageData;
+  
+    if (this.platform.is('cordova')) {
+      imageUrl = this.webView.convertFileSrc(resp.imageData);
+    }
+  
+    const imageFile = new Blob([resp.file], { type: resp.file.type });
+    const imageName = resp.name || resp.file.name;
+  
+    const formData = new FormData();
+    formData.append('avatar', imageFile, imageName);
+  
+    this.userService.uploadAvatar(this.user._id, formData).subscribe({
+      next: (response: any) => {
+        if (response && response.user) {
+          this.userService.getUserProfile(response.user._id).subscribe({
+            next: (updatedUser) => {
+              if (updatedUser && updatedUser._id) {
+                this.user = updatedUser;
+                this.setMainAvatar();
+                this.filterAvatars();
+                this.updateUserInStorage(this.user.toObject());
+                this.changeDetectorRef.detectChanges();
+                this.toastService.presentStdToastr('Avatar uploaded successfully!');
+              } else {
+                this.handleUserDataError();
+              }
+            },
+            error: () => {
+              this.toastService.presentStdToastr('Failed to reload user data.');
+            }
+          });
+        } else {
+          this.toastService.presentStdToastr('Invalid response from server.');
+        }
+      },
+      error: () => {
+        this.toastService.presentStdToastr('Error uploading image');
+      }
+    });
+  }
+  
+
+  onFileSelected(event: any) {
+    const file = event.target.files[0];
+    if (!file) return;
+  
+    const formData = new FormData();
+    formData.append('avatar', file, file.name);
+  
+    this.userService.uploadAvatar(this.user._id, formData).subscribe({
+      next: (response: any) => {
+        this.userService.getUserProfile(response.user._id).subscribe((updatedUser) => {
+          this.user = updatedUser;
+          this.setMainAvatar();
+          this.filterAvatars();
+          this.updateUserInStorage(this.user.toObject());
+          this.changeDetectorRef.detectChanges();
+          this.toastService.presentStdToastr('Avatar uploaded successfully!');
+        });
+      },
+      error: (err) => {
+        this.toastService.presentStdToastr('Upload failed: ' + err.message || err);
+      }
+    });
+  }
+
+  openImagePicker() {
+    if (this.platform.is('cordova')) {
+      // Native mobile: use existing uploadFile logic
+      this.uploadFile.takePicture(this.camera.PictureSourceType.PHOTOLIBRARY, 'image')
+        .then(resp => this.processSelectedMedia(resp))
+        .catch(err => this.toastService.presentStdToastr('Failed: ' + err));
+    } else {
+      // Browser: trigger file input manually
+      const input = document.getElementById('webImageInput') as HTMLInputElement;
+      input?.click();
+    }
+  }
+  
+  
+  openCameraPicker() {
+    this.uploadFile.takePicture(this.camera.PictureSourceType.CAMERA, 'image')
+      .then(resp => this.processSelectedMedia(resp))
+      .catch(err => this.toastService.presentStdToastr('Failed: ' + err));
+  }
+  
+  openVideoPicker() {
+    this.uploadFile.takePicture(this.camera.PictureSourceType.PHOTOLIBRARY, 'video')
+      .then(resp => this.processSelectedMedia(resp))
+      .catch(err => this.toastService.presentStdToastr('Failed: ' + err));
+  }
+  
 
   checkIfFriend() {
     const storedUser = JSON.parse(localStorage.getItem('user'));
@@ -213,12 +307,11 @@ export class DisplayComponent implements OnInit {
   }
 
 
-  takePicture() {
-    this.uploadFile.takePicture(this.camera.PictureSourceType.CAMERA)
+  pickMedia(mediaType: 'image' | 'video', sourceType: number) {
+    this.uploadFile.takePicture(sourceType, mediaType)
       .then((resp: any) => {
         let imageUrl = resp.imageData;
   
-        // Convert file path for Cordova platform
         if (this.platform.is('cordova')) {
           imageUrl = this.webView.convertFileSrc(resp.imageData);
         }
@@ -226,121 +319,40 @@ export class DisplayComponent implements OnInit {
         const imageFile = new Blob([resp.file], { type: resp.file.type });
         const imageName = resp.name || resp.file.name;
   
-        // Create a FormData object to send the image file to the server
         const formData = new FormData();
         formData.append('avatar', imageFile, imageName);
   
-        // Upload the image and handle the response
         this.userService.uploadAvatar(this.user._id, formData).subscribe({
           next: (response: any) => {
             if (response && response.user) {
               this.userService.getUserProfile(response.user._id).subscribe({
                 next: (updatedUser) => {
-                  if (updatedUser && updatedUser._id) {
-                    this.user = updatedUser;
-                    this.setMainAvatar();
-                    this.filterAvatars();
-                    this.updateUserInStorage(this.user.toObject());
-                    this.changeDetectorRef.detectChanges();
-                    this.toastService.presentStdToastr('Avatar uploaded successfully!');
-                  } else {
-                    console.error('Updated user data is undefined or missing _id:', updatedUser);
-                    this.handleUserDataError();
-                  }
+                  this.user = updatedUser;
+                  this.setMainAvatar();
+                  this.filterAvatars();
+                  this.updateUserInStorage(this.user.toObject());
+                  this.changeDetectorRef.detectChanges();
+                  this.toastService.presentStdToastr('Avatar uploaded successfully!');
                 },
                 error: (err) => {
                   console.error('Failed to reload user data after image upload:', err);
                   this.toastService.presentStdToastr('Failed to reload user data.');
                 }
               });
-            } else {
-              console.error('Invalid response structure:', response);
-              this.toastService.presentStdToastr('Error: Invalid response from server.');
             }
           },
           error: (error) => {
             this.toastService.presentStdToastr('Error uploading image: ' + error);
-            console.error('Image upload failed:', error);
           }
         });
-      },
-      err => {
+      }, err => {
         this.toastService.presentStdToastr('Image capture failed: ' + err);
-        console.error('Image capture failed:', err);
       });
   }
 
   
-  selectPictures() {
-    this.imageLoading = true;
-  
-    // Step 1: Select the image from the gallery or other source
-    this.uploadFile.takePicture(this.camera.PictureSourceType.PHOTOLIBRARY)
-      .then((resp: any) => {
-        this.imageLoading = false;
-        let imageUrl = resp.imageData;
-  
-        // Convert file path for Cordova platform
-        if (this.platform.is('cordova')) {
-          imageUrl = this.webView.convertFileSrc(resp.imageData);
-        }
-  
-        const imageFile = new Blob([resp.file], { type: resp.file.type });
-        const imageName = resp.name || resp.file.name;
-  
-        // Create a FormData object to send the image file to the server
-        const formData = new FormData();
-        formData.append('avatar', imageFile, imageName);
-  
-        // Step 2: Upload the avatar and update UI accordingly
-        this.userService.uploadAvatar(this.user?._id, formData).subscribe({
-          next: (response: any) => {
-            if (response && response.user) {
-              // Reinitialize the user after successful upload
-              if (response.user._id) {
-                this.userService.getUserProfile(response.user._id).subscribe({
-                  next: (updatedUser) => {
-                    if (updatedUser && updatedUser._id) {
-                      this.user = updatedUser;
-                      // Continue with your logic
-                      this.setMainAvatar();
-                      this.filterAvatars();
-                      this.updateUserInStorage(this.user.toObject());
-                      this.changeDetectorRef.detectChanges();
-                      this.toastService.presentStdToastr('Avatar uploaded successfully!');
-                    } else {
-                      console.error('Updated user data is undefined or missing _id:', updatedUser);
-                      this.handleUserDataError();
-                    }
-                  },
-                  error: (err) => {
-                    console.error('Failed to reload user data after image upload:', err);
-                    this.toastService.presentStdToastr('Failed to reload user data.');
-                  }
-                });
-              } else {
-                console.error('Uploaded user data is missing _id:', response.user);
-                this.handleUserDataError();
-              }
-            } else {
-              console.error('Invalid response structure:', response);
-              this.toastService.presentStdToastr('Error: Invalid response from server.');
-            }
-          },
-          error: (error) => {
-            this.toastService.presentStdToastr('Error uploading image: ' + error);
-            console.error('Image upload failed:', error);
-          }
-        });
-        
-      }, 
-      err => {
-        this.imageLoading = false;
-        this.toastService.presentStdToastr('Image selection failed: ' + err);
-        console.error('Image selection failed:', err);
-      });
-  }
-  
+
+    
   
 
   async showProfileAlert() {

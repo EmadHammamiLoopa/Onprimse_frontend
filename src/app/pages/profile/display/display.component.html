@@ -72,18 +72,22 @@
     </div>
 
     <ion-fab *ngIf="myProfile" vertical="center" horizontal="end" slot="fixed" class="fab-avatar">
-      <ion-fab-button color="primary" (click)="selectPictures()">
+      <ion-fab-button color="primary">
         <ion-icon name="add-circle-outline"></ion-icon>
       </ion-fab-button>
       <ion-fab-list side="bottom">
-        <ion-fab-button (click)="selectPictures()">
+        <ion-fab-button (click)="openImagePicker()">
           <ion-icon name="images-outline"></ion-icon>
         </ion-fab-button>
-        <ion-fab-button (click)="takePicture()">
+        <ion-fab-button (click)="openCameraPicker()">
           <ion-icon name="camera-outline"></ion-icon>
+        </ion-fab-button>
+        <ion-fab-button (click)="openVideoPicker()">
+          <ion-icon name="videocam-outline"></ion-icon>
         </ion-fab-button>
       </ion-fab-list>
     </ion-fab>
+    
 
     <ion-fab [routerLink]="['/messages/chat/', user.id]" *ngIf="!myProfile" vertical="center" horizontal="end" slot="fixed" class="fab-avatar">
       <ion-fab-button color="secondary">
@@ -91,7 +95,14 @@
       </ion-fab-button>
     </ion-fab>
     
-
+    <input
+    type="file"
+    accept="image/*"
+    id="webImageInput"
+    (change)="onFileSelected($event)"
+    style="display: none"
+  />
+  
     <ion-card class="profile-card">
       <ion-card-content>
         <ion-list>

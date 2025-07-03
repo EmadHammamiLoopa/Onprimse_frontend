@@ -51,7 +51,7 @@ export class PostComponent implements OnInit, OnChanges {
   ngOnInit() {
     this.activatedRoute.queryParams.subscribe(params => {
       if (params.channel) {
-        const channelData = JSON.parse(params.channel);
+const channelData = typeof params.channel === 'string' ? JSON.parse(params.channel) : params.channel;
         this.channel = new Channel().initialize(channelData);
         if (this.channel.type === 'static_events') {
           // Handle logic specific to static_events channels

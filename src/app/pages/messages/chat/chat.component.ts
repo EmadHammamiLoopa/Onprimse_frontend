@@ -15,6 +15,15 @@ import { NativeStorage } from '@ionic-native/native-storage/ngx';
 import { ProductService } from 'src/app/services/product.service';
 import { Product } from 'src/app/models/Product';
 import { from } from 'rxjs';
+import { DomSanitizer, SafeUrl } from '@angular/platform-browser';
+import { take } from 'rxjs/operators';
+import { File as IonicFile, FileEntry } from '@ionic-native/file/ngx';
+import { FilePath } from '@ionic-native/file-path/ngx';
+
+interface ImageFileObject {
+  file: File;
+  imageData: string;
+}
 
 @Component({
   selector: 'app-chat',
@@ -22,6 +31,7 @@ import { from } from 'rxjs';
   styleUrls: ['./chat.component.scss'],
 })
 export class ChatComponent implements OnInit {
+  videoCallDeclined = false;
 
   page = 0;
   resend = [];
@@ -32,28 +42,37 @@ export class ChatComponent implements OnInit {
   index = 0;
 
   image: string = null;
-  imageFile: File = null;
+  imageFile: ImageFileObject = null;
   messageText = "";
+  private activityListeners: any[] = [];
+  private lastActivityTime = Date.now();
 
   connected = false;
   @ViewChild('content') private content: IonContent;
   @ViewChild('infScroll') private infScroll: IonInfiniteScroll;
 
   messages: Message[] = [];
+    groupedMessages: any[] = []; // For date grouping
+
   socket: any;
   user: User;
   authUser: User;
   pageLoading = false;
+  private sendMessageCounter = 0;
 
   allowToChat = false;
   business = false;
+  showMediaOptions: boolean = false;
 
-  constructor(private camera: Camera, private userService: UserService, private route: ActivatedRoute,
+
+  
+  constructor(private camera: Camera, private userService: UserService, private route: ActivatedRoute,private sanitizer: DomSanitizer,
               private messageService: MessageService, private changeDetection: ChangeDetectorRef,
-              private platform: Platform, private uploadFileService: UploadFileService, private webView: WebView,
+              private platform: Platform, private uploadFileService: UploadFileService, private webView: WebView,  private file: IonicFile,
+              private filePath: FilePath,
               private toastService: ToastService, private location: Location, private router: Router, private productService: ProductService, 
               private alertController: AlertController, private socketService: SocketService, private nativeStorage: NativeStorage) {
-    this.socket = SocketService.socket; // Access static member correctly
+                
   }
 
   ngOnInit() {
@@ -65,6 +84,9 @@ export class ChatComponent implements OnInit {
       if (userId) {
         console.log("User ID detected:", userId);
         this.getUserProfile(userId);
+        this.videoCallDeclined = false;
+        this.initializeSocket(userId); // Pass userId directly
+
       }
     });
   
@@ -76,17 +98,47 @@ export class ChatComponent implements OnInit {
         this.getProductDetails(productId);
       }
     });
+    this.setupActivityTracking();
+
   }
   
+  private setupActivityTracking() {
+    // Remove any existing listeners first
+    this.removeActivityListeners();
   
+    // Track various user interactions
+    const events = ['mousemove', 'scroll', 'click', 'keydown', 'touchstart'];
+    
+    events.forEach(event => {
+      const handler = () => this.handleUserActivity();
+      window.addEventListener(event, handler);
+      this.activityListeners.push({ event, handler });
+    });
+  }
   
+  private handleUserActivity() {
+    this.lastActivityTime = Date.now();
+    if (this.socket && this.socket.connected && this.user?.id) {
+      this.socket.emit('user-activity', this.user.id);
+    }
+  }
+  
+  private removeActivityListeners() {
+    this.activityListeners.forEach(({ event, handler }) => {
+      window.removeEventListener(event, handler);
+    });
+    this.activityListeners = [];
+  }
+  
+  ngOnDestroy() {
+    this.removeActivityListeners();
+  }
 
   ionViewWillEnter() {
     console.log("ionViewWillEnter called");
     this.pageLoading = true;
     this.getUserId();
     if (this.authUser && this.authUser.id) {
-      this.initializeSocket();
       this.route.paramMap.subscribe(params => {
         console.log("user params..................detected:", params);
 
@@ -102,7 +154,9 @@ export class ChatComponent implements OnInit {
     }
   }
   
-  
+  toggleMediaOptions() {
+    this.showMediaOptions = !this.showMediaOptions;
+  }
 
   getProductDetails(productId: string, event?) {
     if (!event) this.pageLoading = true;
@@ -120,40 +174,81 @@ export class ChatComponent implements OnInit {
     );
   }
 
-  getAuthUser() {
-    this.pageLoading = true;
-    this.nativeStorage.getItem('user')
-      .then(
-        user => {
-          if (user) {
-            this.authUser = new User().initialize(user);
-            console.log("Authenticated user data fetched and stored:", this.authUser);
-            this.initializeSocket();
-          } else {
-            this.fallbackToLocalStorage();
-          }
-        },
-        err => {
-          this.fallbackToLocalStorage();
-        }
-      );
+  goBack() {
+    this.location.back();
   }
   
+  openMenu() {
+    console.log('Menu opened'); // You can implement real menu later if needed
+  }
 
+  
+  acceptVideoCall(message: Message) {
+    // Emit accept event
+    this.socket.emit('video-call-accepted', {
+      from: this.authUser.id,
+      to: message.from,
+      messageId: message.id
+    });
+  
+    this.user.isFriend = true;  // Now enable video button!
+  }
+  
+  declineVideoCall(message: Message) {
+    this.socket.emit('video-call-declined', {
+      from: this.authUser.id,
+      to: message.from,
+      messageId: message.id
+    });
+  }
+
+  
+  formatLastSeen(lastActive: Date): string {
+    if (!lastActive) return 'unknown';
+    const now = new Date();
+    const diffMs = now.getTime() - new Date(lastActive).getTime();
+    const diffMinutes = Math.floor(diffMs / 60000);
+    if (diffMinutes < 1) return 'just now';
+    if (diffMinutes < 60) return `${diffMinutes} minutes ago`;
+    if (diffMinutes < 1440) return `${Math.floor(diffMinutes / 60)} hours ago`;
+    return `${Math.floor(diffMinutes / 1440)} days ago`;
+  }
+
+  getAuthUser() {
+    this.pageLoading = true;
+    this.nativeStorage.getItem('user').then(
+      (user) => {
+        if (user) {
+          this.authUser = new User().initialize(user);
+          console.log("✅ Authenticated user:", this.authUser);
+          this.getUserId();
+        } else {
+          this.fallbackToLocalStorage();
+        }
+      },
+      (err) => this.fallbackToLocalStorage()
+    );
+  }
+  
   fallbackToLocalStorage() {
     try {
-      const user = JSON.parse(localStorage.getItem('user'));
-      if (user) {
-        this.authUser = new User().initialize(user);
-        this.initializeSocket();
+      const stored = localStorage.getItem('user');
+      if (stored) {
+        const parsedUser = JSON.parse(stored);
+        this.authUser = new User().initialize(parsedUser);
+        console.log("✅ Loaded from localStorage:", this.authUser);
         this.getUserId();
       } else {
+        console.error("❌ No user data found.");
         this.pageLoading = false;
       }
     } catch (err) {
+      console.error("❌ Error parsing localStorage user data:", err);
       this.pageLoading = false;
     }
   }
+  
+  
 
   handleUserInitError() {
     this.pageLoading = false;
@@ -213,69 +308,179 @@ export class ChatComponent implements OnInit {
   
   
   
+async initializeSocket(userId: string) {
+  if (!userId) {
+    console.error("❌ User ID missing");
+    return;
+  }
 
-  initializeSocket() {
-    if (this.socket && this.authUser && this.authUser.id) {
-      this.page = 0;
-      this.socket.emit('connect-user', this.authUser.id);
-      this.initSocketListeners();
+  try {
+    await SocketService.initializeSocket();
+    this.socket = await SocketService.getSocket();
+    
+    // Only register user if not already connected
+    if (!this.socket.connected) {
+      console.warn("⚠️ Socket not connected, reinitializing...");
+      await SocketService.initializeSocket();
     }
-  }
 
-  scrollToBottom() {
-    this.content.scrollToPoint(0, 1000 * 1000);
+    // Register user with the server
+    SocketService.registerUser(userId);
+    
+    // Initialize listeners
+    this.initSocketListeners();
+    
+  } catch (error) {
+    console.error("❌ Socket initialization failed:", error);
+    // Retry after delay
+    setTimeout(() => this.initializeSocket(userId), 5000);
   }
+}
+  
+  
+
 
   getUser(id: string) {
     this.getUserProfile(id);
   }
 
-  getMessages(event) {
-    this.messageService.indexMessages(this.user?.id || this.productId, this.page++)
-      .then(
-        (resp: any) => {
-          this.pageLoading = false;
-          if (!event) {
-            this.messages = [...resp.data.messages.map(message => new Message().initialize(message)), ...this.messages];
-          } else {
-            event.target.complete();
-            this.messages = [...this.messages, ...resp.data.messages.map(message => new Message().initialize(message))];
-          }
-  
-          if (!resp.data.more) {
-            this.infScroll.disabled = true;
-          }
-  
-          this.allowToChat = resp.data.allowToChat;
-  
-          // Use the productId from query parameters if available
-          if (this.productId) {
-            this.getProductDetails(this.productId);
-          } else {
-            this.messages.forEach(message => {
-              if (this.isProductMessage(message)) {
-                console.log('Product ID:', message.productId); // Log product ID
-                if (message.product) {
-                  // Initialize product details if already populated
-                  this.product = new Product().initialize(message.product);
-                } else {
-                  // Fetch product details if not populated
-                  this.getProductDetails(message.productId);
-                }
-              } else {
-                const friendId = message.from === this.authUser.id ? message.to : message.from; // Determine the friend's ID
-                console.log('Friend ID:', friendId); // Log friend ID
-                this.getFriendInfo(friendId); // Use the determined friend's ID
-              }
-            });
-          }
-        },
-        err => {
-          this.pageLoading = false;
-          this.toastService.presentStdToastr(err);
-        }
-      );
+
+// Group messages by date
+groupMessagesByDate() {
+  const grouped = [];
+  let currentDate = null;
+  let currentGroup = null;
+
+  // Sort messages by date (oldest first)
+  const sortedMessages = [...this.messages].sort((a, b) => 
+    new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
+  );
+
+  sortedMessages.forEach(message => {
+    const messageDate = this.formatMessageDate(message.createdAt);
+    
+    if (messageDate !== currentDate) {
+      currentGroup = {
+        date: messageDate,
+        messages: []
+      };
+      grouped.push(currentGroup);
+      currentDate = messageDate;
+    }
+    
+    currentGroup.messages.push(message);
+  });
+
+  this.groupedMessages = grouped;
+  this.changeDetection.detectChanges();
+}
+
+// Format date for grouping
+formatMessageDate(date: Date | string): string {
+  const messageDate = new Date(date);
+  const today = new Date();
+  const yesterday = new Date(today);
+  yesterday.setDate(yesterday.getDate() - 1);
+
+  // Reset time parts for comparison
+  today.setHours(0, 0, 0, 0);
+  yesterday.setHours(0, 0, 0, 0);
+  messageDate.setHours(0, 0, 0, 0);
+
+  if (messageDate.getTime() === today.getTime()) {
+    return 'Today';
+  } else if (messageDate.getTime() === yesterday.getTime()) {
+    return 'Yesterday';
+  } else {
+    return messageDate.toLocaleDateString('en-US', { 
+      weekday: 'long', 
+      year: 'numeric', 
+      month: 'long', 
+      day: 'numeric' 
+    });
   }
+}
+
+// Format time for display
+formatMessageTime(date: Date | string): string {
+  return new Date(date).toLocaleTimeString('en-US', { 
+    hour: 'numeric', 
+    minute: '2-digit' 
+  });
+}
+
+  // Scroll to bottom when new messages arrive
+  scrollToBottom() {
+    setTimeout(() => {
+      this.content.scrollToBottom(300);
+    }, 100);
+  }
+
+  async getMessages(event?) {
+    if (!this.socket) {
+      console.warn("⚠️ WebSocket is not ready. Trying to reinitialize...");
+      if (this.user?.id) {
+        await this.initializeSocket(this.user.id);
+      } else {
+        console.error("❌ Cannot reinitialize WebSocket: User ID missing.");
+        return;
+      }
+    }
+  
+    if (this.pageLoading) {
+      console.warn("⚠️ Already loading messages, skipping request.");
+      this.pageLoading = false;
+      return;
+    }
+    
+    this.pageLoading = true;
+    console.log("📩 Fetching messages...");
+  
+    try {
+      const resp: any = await this.messageService.indexMessages(this.user?.id || this.productId, this.page++);
+      
+      if (!resp.data?.messages?.length) {
+        console.log("✅ No new messages found.");
+        this.pageLoading = false;
+        return;
+      }
+  
+      // Ensure no duplicate messages are pushed
+      const newMessages = resp.data.messages.map(msg => {
+        if (msg.image && typeof msg.image === 'object' && msg.image.path) {
+          msg.image = msg.image.path;
+        }
+        return new Message().initialize(msg);
+      });
+      const existingMessageIds = new Set(this.messages.map(msg => msg.id));
+  
+      newMessages.forEach(msg => {
+        if (!existingMessageIds.has(msg.id)) {
+          this.messages.unshift(msg);
+        }
+      });
+  
+      // Group messages after updating
+      this.groupMessagesByDate();
+      
+      console.log(`✅ Messages loaded: ${this.messages.length}`);
+      this.pageLoading = false;
+  
+      if (!resp.data.more) {
+        this.infScroll.disabled = true;
+      }
+  
+      if (event) {
+        event.target.complete();
+      }
+    } catch (error) {
+      console.error("❌ Error loading messages:", error);
+      this.toastService.presentStdToastr(error);
+    }
+  }
+  
+  
+  
   
   
   
@@ -305,39 +510,144 @@ export class ChatComponent implements OnInit {
   }
 
   initSocketListeners() {
-    if (this.socket) {
-      // Listen for incoming messages
-      this.socket.on('new-message', (message) => {
-        if (this.user && message.from == this.user.id && !this.checkMessageExisting(message)) {
-          this.messages.push(new Message().initialize(message));
-          this.changeDetection.detectChanges();
-          setTimeout(() => {
-            this.scrollToBottom();
-          }, 200);
-        }
-      });
-  
-      // Listen for video call requests
-      this.socket.on('video-call-request', (message) => {
-        if (this.user && message.from == this.user.id) {
-          // Add the video call request message to the chat
-          this.messages.push(new Message().initialize({
-            text: `${this.user.fullName} has requested a video call.`,
-            createdAt: new Date(),
-            type: 'video-call-request'
-          }));
-  
-          // Optional: You can display a toast or notification here
-          this.toastService.presentStdToastr(`${this.user.fullName} has requested a video call.`);
-          
-          this.changeDetection.detectChanges();
-          setTimeout(() => {
-            this.scrollToBottom();
-          }, 200);
-        }
-      });
+    if (!this.socket) {
+      console.error("❌ WebSocket not initialized. Cannot listen for messages.");
+      return;
     }
+  
+    this.socket.on('new-message', (message) => {
+      console.log("📩 New message received from WebSocket:", message);
+  
+      if (typeof message === "string") {
+        message = JSON.parse(message);
+      }
+  
+      // Check if this is a duplicate message
+      const isDuplicate = this.messages.some(m => 
+        m.id === message.id || 
+        (m.text === message.text && 
+         m.from === message.from && 
+         Math.abs(new Date(m.createdAt).getTime() - new Date(message.createdAt).getTime()) < 1000)
+      );
+  
+      if (isDuplicate) {
+        console.log("🔄 Duplicate message detected, ignoring");
+        return;
+      }
+  
+      // Handle video call requests
+      if (message.type === 'video-call-request') {
+        this.handleIncomingVideoCall(message);
+        return;
+      }
+  
+      this.messages.push(new Message().initialize(message));
+      this.groupMessagesByDate();
+      this.scrollToBottom();
+    });
+
+    this.socket.on('video-call-accepted', (data) => {
+      console.log("✅ Video call accepted:", data);
+      this.user.isFriend = true;
+      this.toastService.presentStdToastr(`${this.user.fullName} accepted your video call`);
+    });
+    
+    this.socket.on('video-call-declined', (data) => {
+      console.log("❌ Video call declined:", data);
+      this.toastService.presentStdToastr(`${this.user.fullName} declined your video call`);
+    
+      // 🔥 HERE: add this line
+      if (data.to === this.authUser.id) {
+        this.videoCallDeclined = true;
+      }
+    });
+    
+    this.socket.on('message-sent', (savedMessage) => {
+      console.log("✅ Message sent confirmation received:", savedMessage);
+    
+      // Normalize _id to id
+      savedMessage.id = savedMessage._id;
+    
+      const index = this.messages.findIndex(m => m.id === savedMessage.id);
+      if (index !== -1) {
+        this.messages[index] = new Message().initialize({
+          ...savedMessage,
+          state: 'sent'
+        });
+        this.groupMessagesByDate();
+      } else {
+        console.warn("⚠️ Message not found in local list, pushing it manually");
+        this.messages.push(new Message().initialize({
+          ...savedMessage,
+          state: 'sent'
+        }));
+        this.groupMessagesByDate();
+      }
+    });
+    
+    
+    this.socket.on('user-status-changed', (data) => {
+      console.log("📡 User status changed:", data);
+      if (data.userId === this.user.id) {
+        this.user.online = data.online;
+        this.user = Object.assign(new User(), this.user);
+        this.changeDetection.detectChanges();
+      }
+    });
+    
+        this.socket.on('incoming-video-call', (data) => {
+        console.log("📞 Incoming video call received:", data);
+
+        const message: Message = new Message().initialize({
+            id: data.messageId,
+            from: data.from,
+            to: data.to,
+            text: data.text,
+            type: 'video-call-request',
+            createdAt: new Date(),
+            state: 'sent'
+        });
+
+        this.handleIncomingVideoCall(message);
+    });
   }
+  
+  private handleIncomingVideoCall(message: Message) {
+    if (message.from === this.authUser.id) {
+      console.log("Ignoring own video call request");
+      return;
+    }
+  
+    this.messages.push(new Message().initialize(message));
+    this.groupMessagesByDate();
+    this.scrollToBottom();
+  }
+  
+  
+  private async showVideoCallAlert(message: Message) {
+    const alert = await this.alertController.create({
+      header: 'Video Call Request',
+      message: message.text,
+      buttons: [
+        {
+          text: 'Decline',
+          handler: () => {
+            this.declineVideoCall(message);
+          }
+        },
+        {
+          text: 'Accept',
+          handler: () => {
+            this.acceptVideoCall(message);
+            this.router.navigate(['/messages/video', message.from]);
+          }
+        }
+      ]
+    });
+    await alert.present();
+  }
+  
+  
   
 
   resendMessage(message) {
@@ -369,22 +679,17 @@ export class ChatComponent implements OnInit {
 }
 
 
-async showSubscriptionAlert(usedChats: number, totalChats: number) {
+async showSubscriptionAlert(usedChats = 0, totalChats = 3) {
   const remainingChats = totalChats - usedChats;
   const alert = await this.alertController.create({
     header: 'Free Chat Limit Reached',
-    message: `You have used ${usedChats} out of ${totalChats} free chats for today. You can subscribe to continue chatting without limits.`,
+    message: `You have used ${usedChats} out of ${totalChats} free chats today. Subscribe for unlimited chats.`,
     buttons: [
-      {
-        text: 'Cancel',
-        role: 'cancel'
-      },
+      { text: 'Cancel', role: 'cancel' },
       {
         text: 'Subscribe Now',
         cssClass: 'text-danger',
-        handler: () => {
-          this.router.navigateByUrl('/tabs/subscription');
-        }
+        handler: () => this.router.navigateByUrl('/tabs/subscription'),
       }
     ]
   });
@@ -393,87 +698,264 @@ async showSubscriptionAlert(usedChats: number, totalChats: number) {
 }
 
 
-  sendMessage(message, ind) {
-    const payload = {
-      from: message.from,
-      to: message.to,
-      text: message.text,
-      state: 'sent',
-      image: this.imageFile ? this.image : null,
-      type: message.type, // Include type here
-      productId: this.productId || null // Add productId if it's a product message
-    };
-  
-    this.socket.emit('send-message', payload, this.imageFile, ind);
-  }
-  
-  
-  addMessage() {
-    if (!this.messageText && !this.imageFile) return;
-
-    if (!this.conversationStarted()) {
-        this.messageText = "";
-        return;
-    }
-
-    this.getChatPermission().then(
-        () => {
-            const message = new Message();
-            message.id = this.index.toString();
-            message.from = this.authUser.id;
-            console.log("this.authUser.id:........................", this.authUser.id);
-            message.to = this.user.id; // Ensure this is set correctly
-            console.log("this.user.id:........................", this.user.id);
-
-            message.text = this.messageText;
-            message.state = '';
-            message.createdAt = new Date();
-            message.type = this.productId ? 'product' : 'friend'; // Set type appropriately
-            if (this.productId) {
-                message.productId = this.productId; // Include productId if available
-            }
-            if (this.image) {
-                message.image = this.image;
-            }
-
-            this.messages.push(message);
-            this.sentMessages[this.index] = message;
-
-            setTimeout(() => {
-                this.scrollToBottom();
-            }, 200);
-
-            this.sendMessage(message, this.index++);
-
-            this.messageText = "";
-            this.image = null;
-            this.imageFile = null;
-        },
-        err => {
-            if (err) this.router.navigate(['/tabs/subscription']);
+private async compressImage(base64Image: string): Promise<string> {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.src = base64Image;
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      const MAX_WIDTH = 800;
+      const MAX_HEIGHT = 800;
+      let width = img.width;
+      let height = img.height;
+      
+      if (width > height) {
+        if (width > MAX_WIDTH) {
+          height *= MAX_WIDTH / width;
+          width = MAX_WIDTH;
         }
-    );
+      } else {
+        if (height > MAX_HEIGHT) {
+          width *= MAX_HEIGHT / height;
+          height = MAX_HEIGHT;
+        }
+      }
+      
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(img, 0, 0, width, height);
+      resolve(canvas.toDataURL('image/jpeg', 0.7));
+    };
+  });
 }
 
-  
-  
-  
-  pickImage() {
-    this.uploadFileService.takePicture(this.camera.PictureSourceType.CAMERA)
-      .then(
-        (resp: any) => {
-          if (window.cordova && this.webView) {
-            this.image = this.webView.convertFileSrc(resp.imageData);
-          } else {
-            this.image = resp.imageData;
-          }
-          this.imageFile = resp.file;
-          this.addMessage();
-        },
-        err => {
-        }
-      );
+private async uploadImageAndGetUrl(): Promise<string> {
+  try {
+    if (!this.imageFile?.file) return null;
+
+    const uploadResponse = await this.uploadFileService.upload(this.imageFile.file, this.authUser.id)
+      .pipe(take(1))
+      .toPromise();
+
+    return uploadResponse?.fileUrl || null;
+  } catch (error) {
+    console.error('Image upload failed:', error);
+    this.toastService.presentStdToastr('Failed to upload image');
+    return null;
   }
+}
+
+
+
+private dataURLtoBlob(dataurl: string): Blob {
+  const arr = dataurl.split(',');
+  const mime = arr[0].match(/:(.*?);/)[1];
+  const bstr = atob(arr[1]);
+  let n = bstr.length;
+  const u8arr = new Uint8Array(n);
+  while (n--) {
+    u8arr[n] = bstr.charCodeAt(n);
+  }
+  return new Blob([u8arr], { type: mime });
+}
+
+private dataURLtoFile(dataurl: string, filename: string): File {
+  const arr = dataurl.split(',');
+  const mime = arr[0].match(/:(.*?);/)[1];
+  const bstr = atob(arr[1]);
+  let n = bstr.length;
+  const u8arr = new Uint8Array(n);
+  while (n--) {
+    u8arr[n] = bstr.charCodeAt(n);
+  }
+  return new File([u8arr], filename, { type: mime });
+}
+
+sanitizeImageUrl(url: string): SafeUrl {
+  return this.sanitizer.bypassSecurityTrustUrl(url);
+}
+
+
+async sendMessage(message: any, ind: number): Promise<boolean> {
+  if (!this.socket) {
+    console.warn("⚠️ WebSocket is not ready. Trying to retrieve...");
+    this.socket = await SocketService.getSocket();
+    if (!this.socket) {
+      console.error("❌ WebSocket is still not available. Aborting send.");
+      return false;
+    }
+  }
+
+  let imageUrl = null;
+  if (this.imageFile?.file) {
+    imageUrl = await this.uploadImageAndGetUrl();
+    if (!imageUrl) {
+      // Remove the temporary message if upload failed
+      const index = this.messages.findIndex(m => m.id === message.id);
+      if (index !== -1) {
+        this.messages.splice(index, 1);
+        this.groupMessagesByDate();
+      }
+      return false;
+    }
+  }
+
+  const payload = {
+    id: message.id,
+    from: this.authUser.id,
+    to: this.user.id,
+    text: message.text ?? '', // ensures it's always a string
+    state: 'sending',
+    image: imageUrl || null,
+    type: message.type || 'text',
+    productId: this.productId || null,
+    createdAt: new Date()
+  };
+
+  const messageIndex = this.messages.findIndex(m => m.id === message.id);
+  if (messageIndex !== -1) {
+    this.messages[messageIndex] = new Message().initialize(payload);
+    this.groupMessagesByDate();
+  }
+
+  this.socket.emit('send-message', payload);
+
+  return true;
+}
+
+
+
+
+
+async addMessage() {
+  if (!this.messageText && !this.image) return;
+
+  if (!this.conversationStarted() && this.messages.length > 0) {
+    this.messageText = "";
+    return;
+  }
+
+  try {
+    await this.getChatPermission();
+
+    const tempId = Date.now().toString();
+    
+    // ✅ STEP 1: Upload the image FIRST
+    let imageUrl = null;
+    if (this.imageFile?.file) {
+      imageUrl = await this.uploadImageAndGetUrl();
+      if (!imageUrl) return;
+    }
+
+    // ✅ STEP 2: Create final message with real image URL
+    const message = {
+      id: tempId,
+      from: this.authUser.id,
+      to: this.user.id,
+      text: this.messageText,
+      state: 'sending',
+      image: imageUrl,  // Now it’s a string URL, not SafeUrl
+      type: this.productId ? 'product' : 'friend',
+      productId: this.productId || null,
+      createdAt: new Date()
+    };
+
+    // ✅ STEP 3: Show message immediately in chat
+    this.messages.push(new Message().initialize(message));
+    this.groupMessagesByDate();
+    this.scrollToBottom();
+
+    // ✅ STEP 4: Send message via socket
+    const sendSuccess = await this.sendMessage(message, this.index++);
+    if (sendSuccess) {
+      // ✅ STEP 5: Clear form
+      this.messageText = "";
+      this.image = null;
+      this.imageFile = null;
+    }
+
+  } catch (err) {
+    if (err) this.router.navigate(['/tabs/subscription']);
+  }
+}
+
+
+removeImage() {
+  this.image = null;
+  this.imageFile = null;
+}
+
+
+async pickMedia(mediaType: 'image' | 'video') {
+  try {
+    if (this.platform.is('cordova')) {
+      const sourceType = this.camera.PictureSourceType.CAMERA;
+      const mediaTypeValue = mediaType === 'image' ? this.camera.MediaType.PICTURE : this.camera.MediaType.VIDEO;
+
+      const options = {
+        quality: 75,
+        destinationType: this.camera.DestinationType.FILE_URI,
+        mediaType: mediaTypeValue,
+        sourceType: sourceType,
+        saveToPhotoAlbum: false,
+        correctOrientation: true,
+      };
+
+      const fileUri = await this.camera.getPicture(options);
+      const nativePath = await this.filePath.resolveNativePath(fileUri);
+      const fileEntry = await this.file.resolveLocalFilesystemUrl(nativePath) as FileEntry;
+
+      fileEntry.file(file => {
+        const reader = new FileReader();
+        reader.onloadend = () => {
+          const blob = new Blob([reader.result], { type: file.type });
+          const newFile = new File([blob], file.name, { type: file.type });
+          this.imageFile = { file: newFile, imageData: nativePath };
+          this.image = this.webView.convertFileSrc(nativePath);
+        };
+        reader.readAsArrayBuffer(file);
+      });
+
+    } else {
+      // Browser fallback
+      const input = document.createElement('input');
+      input.type = 'file';
+      input.accept = mediaType === 'image' ? 'image/*' : 'video/*';
+      input.onchange = () => {
+        const file = input.files[0];
+        if (file) {
+          const objectUrl = URL.createObjectURL(file);
+          this.imageFile = { file, imageData: objectUrl };
+          this.image = this.sanitizeImageUrl(objectUrl) as string;
+          
+        }
+      };
+      input.click();
+    }
+
+  } catch (err) {
+    console.error('Error capturing media:', err);
+    this.toastService.presentStdToastr('Failed to capture media');
+  }
+}
+
+
+
+
+// Helper function to convert base64 into File object
+private convertBase64ToFile(base64String: string, filename: string): File {
+  const arr = base64String.split(',');
+  const mime = arr[0].match(/:(.*?);/)[1];
+  const bstr = atob(arr[1]);
+  const u8arr = new Uint8Array(bstr.length);
+  for (let i = 0; i < bstr.length; i++) {
+    u8arr[i] = bstr.charCodeAt(i);
+  }
+  return new File([u8arr], filename, { type: mime });
+}
+
+
 
   allowToShowDate(ind: number): boolean {
     const currDate = {
@@ -569,8 +1051,8 @@ showUproduct() {
   }
 
   nonFriendsChatEnabled() {
-    console.log('Friend status:', this.user?.isFriend);
-    console.log('Messages count:', this.messages.length);
+   // console.log('Friend status:', this.user?.isFriend);
+   // console.log('Messages count:', this.messages.length);
   
     if (this.user && this.user.isFriend) {
       return true; // No limit for friends
@@ -579,10 +1061,11 @@ showUproduct() {
     return this.messages.length < 10; // Limit for non-friends
   }
   
-  requestVideoCall() {
+  async requestVideoCall() {
     // Ensure conversation is started and the user can still send messages (if non-friend)
     if (!this.conversationStarted() || !this.nonFriendsChatEnabled()) {
       console.log("Cannot request video call: conversation not started or message limit reached.");
+      this.toastService.presentStdToastr('Please start a conversation first');
       return;
     }
   
@@ -591,34 +1074,80 @@ showUproduct() {
       return;
     }
   
+    // Ensure the socket is initialized
+    if (!this.socket) {
+      console.warn("⚠️ WebSocket is not ready. Trying to reinitialize...");
+      if (this.user?.id) {
+        await this.initializeSocket(this.user.id);
+      } else {
+        console.error("❌ Cannot reinitialize WebSocket: User ID missing.");
+        return;
+      }
+    }
+  
+    const alert = await this.alertController.create({
+      header: 'Request Video Call',
+      message: `Do you want to request a video call with ${this.user.fullName}?`,
+      buttons: [
+        {
+          text: 'Cancel',
+          role: 'cancel'
+        },
+        {
+          text: 'Request',
+          handler: () => this.sendVideoCallRequest()
+        }
+      ]
+    });
+  
+    await alert.present();
+  }
+  
+  private async sendVideoCallRequest() {
     const videoCallMessage = new Message();
     videoCallMessage.id = this.index.toString();
     videoCallMessage.from = this.authUser.id;
     videoCallMessage.to = this.user.id;
     videoCallMessage.text = `${this.authUser.fullName} has requested a video call.`;
-    videoCallMessage.state = '';
+    videoCallMessage.state = 'sending';
     videoCallMessage.createdAt = new Date();
-    videoCallMessage.type = 'video-call-request'; // Custom type for video call request
-  
-    this.messages.push(videoCallMessage);
-    this.sentMessages[this.index] = videoCallMessage;
-  
-    // Emit socket event to notify the recipient
+    videoCallMessage.type = 'video-call-request';
+
+    // Add locally
+    this.messages.push(new Message().initialize(videoCallMessage));
+    this.groupMessagesByDate();
+    this.scrollToBottom();
+
+    // Only send what backend expects
     this.socket.emit('video-call-request', {
       from: this.authUser.id,
       to: this.user.id,
       text: videoCallMessage.text,
+      messageId: videoCallMessage.id
+    }, (ack) => {
+      if (ack?.success) {
+        const messageIndex = this.messages.findIndex(m => m.id === videoCallMessage.id);
+        if (messageIndex !== -1) {
+          this.messages[messageIndex].state = 'sent';
+          this.groupMessagesByDate();
+        }
+      } else {
+        console.error("Video call request failed:", ack?.error);
+      }
     });
-  
+    
     this.index++;
-    this.scrollToBottom();
-  }
+}
+
   
   
-  
-  canRequestVideoCall(): boolean {
-    return this.user && !this.user.isFriend;  // Only allow for non-friends
-  }
+canRequestVideoCall(): boolean {
+  if (!this.user) return false;
+  if (this.user.isFriend) return true;  // Always allow friends
+  if (this.videoCallDeclined) return false;  // Block after declined
+  return true;  // Allow if not declined
+}
+
   
   
   

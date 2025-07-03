@@ -25,3 +25,9 @@ ion-toggle {
   --height: 25px;
   --border-radius: 50%!important;
 }
+ion-toggle {
+  --background:grey; /* Default OFF state */
+  --handle-background: white;
+  --background-checked: blue; /* ON state */
+  --handle-background-checked: white;
+}

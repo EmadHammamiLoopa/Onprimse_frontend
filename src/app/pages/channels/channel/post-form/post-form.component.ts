@@ -19,6 +19,7 @@ export class PostFormComponent implements OnInit {
   @Input() channel:Channel;
   showEventFields = false; // Flag to toggle event-specific fields
   showDatingFields = false; // Flag to toggle dating-specific fields
+  @ViewChild('postTextarea', { static: false }) postTextarea: ElementRef;
 
   anonyme = false;
   visibility = 'public'; // Default visibility
@@ -90,13 +91,19 @@ export class PostFormComponent implements OnInit {
     });
   }
 
+  shouldAutoGrow = true;
 
   ionViewWillEnter(){
-    this.postText = null;
+    this.resetForm();
+    this.forceTextareaResize();
+    this.postText = "";
     const randomInd = Math.round(Math.random() * (this.colors.length - 1))
     this.selectColor(this.colors[randomInd]);
+    this.shouldAutoGrow = false;
+    setTimeout(() => this.shouldAutoGrow = true, 50);
   }
 
+  
   triggerFileInput() {
     this.fileInput.nativeElement.click();
   }
@@ -204,11 +211,26 @@ addPost() {
 }
 
 
+forceTextareaResize() {
+  setTimeout(() => {
+    if (this.postTextarea && this.postTextarea.nativeElement) {
+      const textarea = this.postTextarea.nativeElement.querySelector('.native-textarea') as HTMLTextAreaElement;
+      if (textarea) {
+        textarea.style.height = 'auto';  // Reset height
+        textarea.style.height = textarea.scrollHeight + 'px'; // Force recalculation
+      }
+    }
+  }, 100); // Slight delay to ensure rendering is done
+}
 
 resetForm() {
-  this.postText = '';
+  this.postText = ''; // Reset text
   this.mediaFile = null;
   this.mediaPreview = '';
+  this.postBackColor = '#fff';
+  this.postTextColor = '#000';
+
+  setTimeout(() => this.forceTextareaResize(), 200); // Recalculate after UI updates
 }
 
   selectColor(color){

@@ -16,18 +16,44 @@ export class UserService {
   private apiUrl = `${environment.apiUrl}/user`;
   private currentUserSubject: BehaviorSubject<User>;
   public currentUser: Observable<User>;
-  private nativeStorage: NativeStorage;
   private viewedUserSubject: BehaviorSubject<User>;
   public viewedUser: Observable<User>;
 
-  constructor(private http: HttpClient, private storageService: StorageService) {
-    this.currentUserSubject = new BehaviorSubject<User>(JSON.parse(localStorage.getItem('currentUser')));
+  constructor(
+    private http: HttpClient,
+    private storageService: StorageService,
+    private nativeStorage: NativeStorage // ✅ Add clearly
+  ) {
+    this.currentUserSubject = new BehaviorSubject<User>(null);
     this.currentUser = this.currentUserSubject.asObservable();
-
+  
     this.viewedUserSubject = new BehaviorSubject<User>(null);
     this.viewedUser = this.viewedUserSubject.asObservable();
+  
+    this.initCurrentUser(); // ✅ initialize clearly
   }
+  
 
+  private async initCurrentUser() {
+    try {
+      let user: User = await this.nativeStorage.getItem('user');
+  
+      if (!user) {
+        const localStorageUser = localStorage.getItem('user');
+        user = localStorageUser ? JSON.parse(localStorageUser) : null;
+      }
+  
+      if (user) {
+        this.currentUserSubject.next(new User().initialize(user));
+        console.log('✅ Current user initialized:', user);
+      } else {
+        console.warn('⚠️ No user found in any storage');
+      }
+  
+    } catch (error) {
+      console.error('❌ Initialization error:', error);
+    }
+  }
   public get currentUserValue(): User {
     return this.currentUserSubject.value;
   }
@@ -37,7 +63,7 @@ export class UserService {
   }
 
   setCurrentUser(user: User) {
-    localStorage.setItem('currentUser', JSON.stringify(user));
+    localStorage.setItem('user', JSON.stringify(user));
     this.currentUserSubject.next(user);
   }
 
@@ -127,6 +153,50 @@ getCurrentUserId(): string | null {
     return this.http.get(`${this.apiUrl}/user/friends`).toPromise();
   }
 
+  getPartnerPeerId(userId: string): Observable<string | null> {
+    return this.http.get<{ success: boolean; peerId?: string; message: string }>(
+      `${this.apiUrl}/${userId}/peer`
+    ).pipe(
+      map(response => {
+        return response.success && response.peerId ? response.peerId : null;
+      }),
+      catchError(error => {
+        console.error('❌ Peer lookup error:', error);
+        return throwError(() => new Error('Error fetching partner peer ID'));
+      })
+    );
+  }
+  
+  heartbeatPeer(userId: string): Promise<void> {
+    return new Promise((resolve, reject) => {
+      this.http.patch(`${this.apiUrl}/${userId}/peer/heartbeat`, {}, {
+        headers: { 'Content-Type': 'application/json' }
+      }).subscribe(
+        ()  => resolve(),
+        err => reject(err)
+      );
+    });
+  }
+  
+  sendPeerIdToBackend(userId: string, peerId: string): Promise<void> {
+    console.log("peerIdpeerIdpeerIdpeerId to backend:", peerId);
+
+    return new Promise((resolve, reject) => {
+        this.http.post(`${this.apiUrl}/${userId}/peer`, { peerId }, {
+            headers: { 'Content-Type': 'application/json' }
+        }).subscribe(
+            response => {
+                console.log("✅ Peer ID successfully sent to backend:", response);
+                resolve();
+            },
+            error => {
+                console.error("❌ Error sending Peer ID to backend:", error);
+                reject(error);
+            }
+        );
+    });
+}
+
 
   follow(id: string): Observable<any> {
     return this.http.post(`${this.apiUrl}/follow/${id}`, {});
@@ -140,7 +210,7 @@ getCurrentUserId(): string | null {
     });
 
     console.log(`Fetching friends for page: ${page}`);
-    return this.http.get(`${this.apiUrl}/friends`, { 
+    return this.http.get(`${this.apiUrl}/friends`, { // ✅ Ensure the correct URL
       headers: headers,
       params: { page: page.toString() } 
     });

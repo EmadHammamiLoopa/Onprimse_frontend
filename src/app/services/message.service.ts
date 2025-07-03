@@ -1,5 +1,6 @@
 import { Router } from '@angular/router';
-import { HTTP } from '@ionic-native/http/ngx';import { NativeStorage } from '@ionic-native/native-storage/ngx';
+import { HTTP } from '@ionic-native/http/ngx';
+import { NativeStorage } from '@ionic-native/native-storage/ngx';
 import { DataService } from './data.service';
 import { Injectable } from '@angular/core';
 import { Platform } from '@ionic/angular';
@@ -14,27 +15,31 @@ export class MessageService extends DataService {
     super('message', nativeStorage, http, httpClient, router, platform);
   }
 
-  indexMessages(id: string, page: number){
+  indexMessages(id: string, page: number) {
     return this.sendRequest({
       method: 'get',
       url: '/' + id,
-      data: {page: page.toString()}
-    })
+      params: { page: page.toString() }
+    }).then((response) => {
+      console.log("📥 Raw message response from backend:", response);
+      return response;
+    });
   }
+  
 
-  usersMessages(page: number){
+  usersMessages(page: number) {
     return this.sendRequest({
       method: 'get',
       url: '/users',
-      data: {page: page.toString()}
-    })
+      params: { page: page.toString() } // Use `params` for query parameters
+    });
   }
 
-  getPermission(id: string){
+  getPermission(id: string) {
     return this.sendRequest({
       method: 'get',
       url: '/permission/' + id
-    })
+    });
   }
 
   deleteMessage(id: string) {
@@ -43,5 +48,4 @@ export class MessageService extends DataService {
       url: '/' + id
     });
   }
-  
 }

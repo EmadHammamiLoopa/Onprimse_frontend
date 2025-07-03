@@ -1,11 +1,10 @@
 <ion-tabs>
   <ion-tab-bar color="light" slot="bottom">
-    <ion-tab-button
-      *ngFor="let tab of tabs"
-      [tab]="tab.url"
-    >
+    <ion-tab-button *ngFor="let tab of tabs" [tab]="tab.url">
       <i [class]="'icon ' + tab.icon" [style.color]="tab.iconColor"></i>
-      <ion-badge *ngIf="tab.badgeCount > 0" color="danger">{{ tab.badgeCount }}</ion-badge>
+      <ion-badge *ngIf="tab.badgeCount && tab.badgeCount > 0" color="danger">
+        {{ tab.badgeCount }}
+      </ion-badge>
     </ion-tab-button>
   </ion-tab-bar>
 </ion-tabs>

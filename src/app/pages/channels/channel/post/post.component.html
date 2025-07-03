@@ -12,6 +12,40 @@
       <small class="date">
         {{ post.createdAt | extractDiffTime }}
       </small>
+
+    <ng-container *ngIf="post.user.id === user.id">
+  <ion-button
+    shape="round"
+    class="visibility-toggle-btn"
+    [style]="{'--color': post.color}"
+    fill="clear"
+    size="small"
+    (click)="toggleVisibilityOptions($event)"
+  >
+    <ion-icon name="eye"></ion-icon>
+  </ion-button>
+  
+  <!-- Custom visibility options dropdown -->
+  <div class="custom-popover" [ngClass]="{'show': visibilityOptionsOpen}" #dropdown>
+    <ion-list class="visibility-dropdown">
+      <ion-item button (click)="changeVisibility('public')">
+        <ion-icon name="earth" slot="start"></ion-icon>
+        <ion-label>Public</ion-label>
+      </ion-item>
+
+      <ion-item button (click)="changeVisibility('friends-only')">
+        <ion-icon name="people" slot="start"></ion-icon>
+        <ion-label>Friends</ion-label>
+      </ion-item>
+      
+      <ion-item button (click)="changeVisibility('private')">
+        <ion-icon name="lock-closed" slot="start"></ion-icon>
+        <ion-label>Only me</ion-label>
+      </ion-item>
+
+    </ion-list>
+  </div>
+</ng-container>
       <div class="pl-2 pr-2 py-2">
         <span>{{ post.text }}</span>
       </div>
@@ -60,36 +94,7 @@
 
       <!-- Visibility change button and dropdown only visible to the post creator -->
  <!-- Visibility change button and dropdown only visible to the post creator -->
-<ng-container *ngIf="post.user.id === user.id">
-  <ion-button
-    shape="round"
-    class="visibility-toggle-btn"
-    [style]="{'--color': post.color}"
-    fill="clear"
-    size="small"
-    (click)="toggleVisibilityOptions($event)"
-  >
-    <ion-icon name="eye"></ion-icon>
-  </ion-button>
-  
-  <!-- Custom visibility options dropdown -->
-  <div class="custom-popover" [ngClass]="{'show': visibilityOptionsOpen}" #dropdown>
-    <ion-list class="visibility-dropdown">
-      <ion-item button (click)="changeVisibility('public')">
-        <ion-icon name="earth" slot="start"></ion-icon>
-        <ion-label>Public</ion-label>
-      </ion-item>
-      <ion-item button (click)="changeVisibility('private')">
-        <ion-icon name="lock-closed" slot="start"></ion-icon>
-        <ion-label>Only me</ion-label>
-      </ion-item>
-      <ion-item button (click)="changeVisibility('friends-only')">
-        <ion-icon name="people" slot="start"></ion-icon>
-        <ion-label>Friends Only</ion-label>
-      </ion-item>
-    </ion-list>
-  </div>
-</ng-container>
+
 
       
       

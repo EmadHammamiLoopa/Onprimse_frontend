@@ -11,6 +11,8 @@ type RequestOptions = {
   method: HttpMethod,
   url: string,
   data?: any,
+  params?: any, // Add this line
+
   header?: any,
   serializer?: HttpSerializer,
   noApi?: boolean
