@@ -1,13 +1,12 @@
 <app-loader *ngIf="pageLoading"></app-loader>
 
-<ion-content color="dark" class="video-container">
-  <!-- Loading overlay -->
+<ion-content fullscreen color="dark" class="video-container">
+  <!-- Loading Overlay -->
   <div *ngIf="!user || !partner" class="loading-overlay">
     <ion-spinner></ion-spinner>
     <div>Loading call interface...</div>
   </div>
 
-  <!-- Main content -->
   <ng-container *ngIf="user && partner">
     <!-- Partner Video -->
     <video
@@ -18,11 +17,13 @@
       playsinline
       webkit-playsinline
       preload="auto"
-      x-webkit-airplay="allow"
-      [ngClass]="{'second-video': topVideoFrame === 'partner-video', 'main-video': topVideoFrame !== 'partner-video'}"
-      [class.hidden]="!answered"
-      (error)="handleVideoError('partner')">
-    </video>
+      [ngClass]="{
+        'main-video': topVideoFrame !== 'partner-video',
+        'small-video': topVideoFrame === 'partner-video',
+        'hidden': !answered
+      }"
+      (error)="handleVideoError('partner')"
+    ></video>
 
     <!-- My Video -->
     <video
@@ -31,24 +32,23 @@
       (click)="swapVideo('partner-video')"
       autoplay
       playsinline
-      webkit-playsinline
       muted
       preload="auto"
-      [ngClass]="{'second-video': topVideoFrame === 'my-video', 'main-video': topVideoFrame !== 'my-video'}"
-      (error)="handleVideoError('local')">
-    </video>
+      [ngClass]="{
+        'main-video': topVideoFrame !== 'my-video',
+        'small-video': topVideoFrame === 'my-video'
+      }"
+      (error)="handleVideoError('local')"
+    ></video>
 
-    <!-- Call Duration -->
-    <div class="call-duration" *ngIf="answered">
-      {{ callDuration }}
-    </div>
-
-    <!-- Call Info -->
+    <!-- Call Info Before Answering -->
     <div class="call-info" *ngIf="!answered">
       <ion-avatar>
-        <img [src]="partner?.mainAvatar || 'assets/default-avatar.png'" 
-             [alt]="partner?.fullName"
-             (error)="partner.mainAvatar = 'assets/default-avatar.png'">
+        <img
+          [src]="partner?.mainAvatar || 'assets/default-avatar.png'"
+          [alt]="partner?.fullName"
+          (error)="partner.mainAvatar = 'assets/default-avatar.png'"
+        />
       </ion-avatar>
       <div class="user-name">{{ partner?.fullName }}</div>
       <div class="call-status">
@@ -57,71 +57,82 @@
       </div>
     </div>
 
+    <!-- Call Duration -->
+    <div class="call-duration" *ngIf="answered">
+      {{ callDuration }}
+    </div>
+
     <!-- Controls -->
     <div class="controls-container">
       <div class="button-row">
-        <!-- Answer -->
-        <ion-fab-button 
-          *ngIf="answer && !answered" 
-          class="control-button" 
-          color="success" 
+        <ion-fab-button
+          *ngIf="answer && !answered"
+          class="control-button"
+          color="success"
           (click)="answerCall()"
           [disabled]="answeringCall"
-          aria-label="Answer call">
+          aria-label="Answer Call"
+        >
           <ion-spinner *ngIf="answeringCall"></ion-spinner>
           <i *ngIf="!answeringCall" class="fas fa-phone"></i>
         </ion-fab-button>
 
-        <!-- Start Call -->
-        <ion-fab-button 
-          *ngIf="!answered && !answer" 
-          class="control-button" 
-          color="primary" 
+        <ion-fab-button
+          *ngIf="!answered && !answer"
+          class="control-button"
+          color="primary"
           (click)="call()"
           [disabled]="startingCall"
-          aria-label="Start call">
+          aria-label="Start Call"
+        >
           <ion-spinner *ngIf="startingCall"></ion-spinner>
           <i *ngIf="!startingCall" class="fas fa-video"></i>
         </ion-fab-button>
 
-        <!-- End Call -->
-        <ion-fab-button 
-          class="control-button" 
-          color="danger" 
-          (click)="closeCall()" 
+        <ion-fab-button
+          class="control-button"
+          color="danger"
+          (click)="closeCall()"
           [disabled]="!myEl?.srcObject || endingCall"
-          aria-label="End call">
+          aria-label="End Call"
+        >
           <ion-spinner *ngIf="endingCall"></ion-spinner>
           <i *ngIf="!endingCall" class="fas fa-phone-slash"></i>
         </ion-fab-button>
       </div>
 
       <div class="button-row" *ngIf="answered || !answer">
-        <!-- Audio Toggle -->
-        <ion-fab-button 
-          class="control-button" 
-          [color]="audioEnabled ? 'light' : 'danger'" 
+        <ion-fab-button
+          class="control-button"
+          [color]="audioEnabled ? 'light' : 'danger'"
           (click)="toggleAudio()"
-          aria-label="Toggle microphone">
-          <i class="fas" [ngClass]="{'fa-microphone': audioEnabled, 'fa-microphone-slash': !audioEnabled}"></i>
+          aria-label="Toggle Microphone"
+        >
+          <i class="fas" [ngClass]="{
+            'fa-microphone': audioEnabled,
+            'fa-microphone-slash': !audioEnabled
+          }"></i>
         </ion-fab-button>
 
-        <!-- Camera Toggle -->
-        <ion-fab-button 
-          class="control-button" 
-          [color]="cameraEnabled ? 'light' : 'danger'" 
+        <ion-fab-button
+          class="control-button"
+          [color]="cameraEnabled ? 'light' : 'danger'"
           (click)="toggleCamera()"
-          aria-label="Toggle camera">
-          <i class="fas" [ngClass]="{'fa-video': cameraEnabled, 'fa-video-slash': !cameraEnabled}"></i>
+          aria-label="Toggle Camera"
+        >
+          <i class="fas" [ngClass]="{
+            'fa-video': cameraEnabled,
+            'fa-video-slash': !cameraEnabled
+          }"></i>
         </ion-fab-button>
 
-        <!-- Switch Camera -->
-        <ion-fab-button 
-          class="control-button" 
-          color="light" 
+        <ion-fab-button
+          class="control-button"
+          color="light"
           (click)="toggleCameraDirection()"
-          aria-label="Switch camera"
-          [disabled]="switchingCamera">
+          [disabled]="switchingCamera"
+          aria-label="Switch Camera"
+        >
           <ion-spinner *ngIf="switchingCamera"></ion-spinner>
           <i *ngIf="!switchingCamera" class="fas fa-sync-alt"></i>
         </ion-fab-button>

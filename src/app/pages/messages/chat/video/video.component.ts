@@ -85,6 +85,8 @@ switchingCamera = false;
 
 
   ngOnInit() {
+    this.webRTC.listAllMediaDevices();
+
     console.log('📞 Initializing Video Call Component...');
     
     // Subscribe to call state changes
@@ -155,9 +157,17 @@ switchingCamera = false;
   }
 
 // Remove ionViewDidLeave and keep ionViewWillLeave
+// In your video component
 ionViewWillLeave() {
-  console.log('🏁 VideoComponent will leave');
-  this.cleanupResources();
+  console.log('Cleaning up resources');
+  if (this.webRTC.myStream) {
+    this.webRTC.myStream.getTracks().forEach(track => {
+      track.stop();
+      track.enabled = false;
+    });
+    this.webRTC.myStream = null;
+  }
+  this.webRTC.close();
 }
 
   ngOnDestroy() {
@@ -212,6 +222,24 @@ ionViewWillLeave() {
   }
 
 
+  async startCall() {
+    try {
+      const stream = await this.webRTC.getUserMedia();
+      if (!stream) {
+        throw new Error('Could not access devices');
+      }
+      
+      // Show which device is being used
+      const videoTrack = stream.getVideoTracks()[0];
+      console.log('Using device:', videoTrack.label);
+      this.toastService.presentStdToastr(`Using ${videoTrack.label || 'default device'}`);
+      
+      // Proceed with call setup
+    } catch (error) {
+      this.toastService.presentStdToastr(error.message);
+    }
+  }
+
 // Add these methods to your component
 private startCallTimer() {
   this.callDuration = 0; // Reset when call starts
@@ -229,17 +257,17 @@ private stopCallTimer() {
 }
 async ionViewWillEnter() {
   try {
-    this.pageLoading = true; this.cdr.detectChanges();
+    this.pageLoading = true; 
+    this.cdr.detectChanges();
 
     await this.webRTC.createPeer(this.authUser._id); // only once
-
     await this.waitForVideoElements();
-    if (!await this.checkMediaPermissions()) throw new Error('perm');
-
+    
     await this.webRTC.init(this.myEl, this.partnerEl);
 
     if (!this.answer) {
       console.log('🔄 caller mode');
+      await this.startCall(); // Call the startCall method here
       await this.initializeCallWithRetry();
     }
   } catch (e) {
@@ -247,7 +275,8 @@ async ionViewWillEnter() {
     this.toastService.presentStdToastr('Failed to start video call.');
     this.router.navigate(['/']);
   } finally {
-    this.pageLoading = false; this.cdr.detectChanges();
+    this.pageLoading = false; 
+    this.cdr.detectChanges();
   }
 }
 
@@ -271,17 +300,7 @@ private async initializeCallWithRetry(retries = 3): Promise<boolean> {
   throw new Error(`Failed to initialize call after ${retries} attempts`);
 }
 
-private async checkMediaPermissions(): Promise<boolean> {
-  try {
-    const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
-    stream.getTracks().forEach(track => track.stop());
-    return true;
-  } catch (err) {
-    console.error("Permission denied:", err);
-    this.toastService.presentStdToastr("Please enable camera and microphone permissions");
-    return false;
-  }
-}
+
 
 private async waitForVideoElements(): Promise<void> {
   return new Promise((resolve, reject) => {
@@ -505,9 +524,7 @@ listenForVideoCallEvents() {
   this.socket.on('video-call-started', (data) => {
       console.log("📞 Video call started:", data);
       this.playAudio('/assets/audio/calling.mp3');
-      if (this.answer) { // If user is answering a call
-        this.answerCall();
-    }
+
   });
 
   this.socket.on('video-canceled', () => {
@@ -568,7 +585,8 @@ playAudio(src: string) {
     try {
         // ✅ Request user media (camera + mic)
         const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
-        
+        await this.webRTC.listAllMediaDevices();
+
         if (!stream) {
             throw new Error("❌ Failed to get media stream.");
         }
@@ -632,6 +650,13 @@ async call(): Promise<void> {
     if (!this.localStream) {
       await this.init(this.myEl, this.partnerEl);
     }
+
+    // Initialize with automatic device selection
+    if (!this.localStream) {
+      this.localStream = await this.webRTC.getOptimalMediaStream();
+      this.myEl.srcObject = this.localStream;
+    }
+
     /* 2 — guarantee a live & open PeerJS instance --------------------- */
     if (!WebrtcService.peer || WebrtcService.peer.destroyed) {
       const myPeerId = await this.userService.getPartnerPeerId(this.authUser._id).toPromise();
@@ -763,6 +788,12 @@ async call(): Promise<void> {
 
   async closeCall() {
     console.log("📴 Closing the call with full cleanup...");
+    
+    if (this.webRTC.myStream) {
+      this.webRTC.myStream.getTracks().forEach(track => {
+        track.stop();
+      });
+    }
     
     // 1. Stop all media streams
     if (this.webRTC.myStream) {

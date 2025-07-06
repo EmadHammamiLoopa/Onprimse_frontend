@@ -2,51 +2,56 @@
   position: relative;
   width: 100%;
   height: 100%;
-  background-color: #000;
+  background: #000;
   overflow: hidden;
 }
 
-.main-video {
+.main-video, .small-video {
   position: absolute;
+  object-fit: cover;
+  background: #000;
+  transition: all 0.3s ease-in-out;
+}
+
+.main-video {
   width: 100%;
   height: 100%;
-  object-fit: cover;
+  z-index: 1;
   transform: scaleX(-1);
 }
 
-.second-video {
-  position: absolute;
-  top: 1rem;
-  right: 1rem;
+.small-video {
   width: 120px;
   height: 160px;
-  border-radius: 12px;
+  top: 1rem;
+  right: 1rem;
   border: 2px solid #fff;
-  box-shadow: 0 8px 16px rgba(0, 0, 0, 0.5);
+  border-radius: 12px;
   z-index: 10;
-  object-fit: cover;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.7);
 }
 
 .call-info {
   position: absolute;
-  top: 0;
+  top: 1rem;
   left: 0;
   right: 0;
-  padding: 1rem;
   text-align: center;
-  color: #fff;
+  color: white;
   z-index: 20;
-  backdrop-filter: blur(8px);
+  backdrop-filter: blur(10px);
   background: rgba(0, 0, 0, 0.5);
+  padding: 1rem;
 
   ion-avatar {
     width: 80px;
     height: 80px;
     margin: 0 auto 10px;
+    border: 2px solid #fff;
   }
 
   .user-name {
-    font-size: 20px;
+    font-size: 22px;
     font-weight: bold;
   }
 
@@ -56,9 +61,22 @@
   }
 }
 
+.call-duration {
+  position: absolute;
+  top: 1rem;
+  left: 0;
+  right: 0;
+  text-align: center;
+  color: #fff;
+  font-size: 16px;
+  font-weight: 500;
+  z-index: 20;
+  text-shadow: 0 0 4px #000;
+}
+
 .controls-container {
   position: absolute;
-  bottom: 24px;
+  bottom: 1.5rem;
   left: 0;
   right: 0;
   z-index: 30;
@@ -75,30 +93,45 @@
 }
 
 .control-button {
-  --box-shadow: 0 4px 10px rgba(0, 0, 0, 0.4);
-  width: 56px;
-  height: 56px;
+  width: 60px;
+  height: 60px;
+  border-radius: 50%;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.6);
+
   i {
     font-size: 22px;
   }
 }
 
-.call-duration {
+.loading-overlay {
   position: absolute;
-  top: 16px;
+  top: 0;
   left: 0;
-  right: 0;
-  text-align: center;
-  color: white;
-  font-size: 16px;
-  font-weight: 500;
-  z-index: 20;
+  width: 100%;
+  height: 100%;
+  background: #000;
+  color: #fff;
+  z-index: 999;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  font-size: 18px;
+  gap: 10px;
 }
 
-@media (max-height: 600px) {
-  .second-video {
+
+
+/* Responsive Tweaks */
+@media (max-width: 600px), (max-height: 600px) {
+  .small-video {
     width: 90px;
     height: 120px;
+  }
+
+  .control-button {
+    width: 52px;
+    height: 52px;
   }
 
   .call-info ion-avatar {
