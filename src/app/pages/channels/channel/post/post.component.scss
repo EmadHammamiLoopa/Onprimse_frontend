@@ -1,173 +1,140 @@
-.date{
-  font-size: 14px;
-}
-.user-name, .star-value{
-  font-size: 15px;
-}
-.post-text{
-  font-size: 16px;
-  min-height: 65px;
+.jodel-card{
+  --ion-card-background: transparent;
+  background: var(--post-bg);
+  color: var(--post-fg);
+  border-radius: 16px;
+  padding: 10px 12px;
+  box-shadow: 0 6px 14px rgba(0,0,0,.08);
 }
 
-/* Media container hover effect */
-.media-container {
-  position: relative;
-  cursor: pointer;
-  overflow: hidden;
-  border-radius: 8px;
-  transition: box-shadow 0.3s ease;
+/* header */
+.jdl-h{display:flex;justify-content:space-between;align-items:center;gap:6px}
+.jdl-user{display:flex;align-items:center;gap:6px;font-weight:600}
+.jdl-user .name{font-size:14px}
+.jdl-user .date{font-size:12px;opacity:.85}
+.jdl-user .dot{opacity:.6}
+.jdl-h-actions{display:flex;align-items:center;gap:2px}
+.icon-btn{--padding-start:6px;--padding-end:6px;--border-radius:10px;font-size:14px}
+
+/* text */
+.jdl-text{
+  font-size:15px; line-height:1.35;
+  margin:6px 0 4px; word-wrap:break-word;
 }
 
-.media-container:hover {
-  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
-}
-
-/* Image container with hover effect */
-.media-container {
-  position: relative;
-  cursor: pointer;
-  overflow: hidden;
-  border-radius: 8px;
-  transition: box-shadow 0.3s ease;
-}
-.media-container:hover {
-  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
-}
-
-/* Image styles */
-.post-media-img {
-  width: 100%;
-  height: auto;
-  max-width: 150px; /* Small size initially */
-  border-radius: 8px;
-  transition: transform 0.3s ease, filter 0.3s ease;
-}
-.post-media-img.enlarged {
-  max-width: 100%; /* Enlarge on click */
-  transform: scale(1.5);
-  filter: brightness(0.95);
-}
-
-
-/* Expiry circle wrapper */
-.expiry-circle-wrapper {
-  position: absolute;
-  top: 5px;
-  right: 5px;
-  width: 35px; /* Smaller size */
-  height: 35px; /* Smaller size */
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: rgba(255, 255, 255, 0.7); /* Light background for better contrast */
-  border-radius: 50%; /* Ensure roundness */
-  padding: 2px; /* Adds padding to make it more balanced */
-}
-
-/* Circular progress bar */
-.expiry-circle {
-  position: relative;
-  width: 30px; /* Smaller size */
-  height: 30px; /* Smaller size */
-}
-.circle-svg {
-  width: 100%;
-  height: 100%;
-  transform: rotate(-90deg); /* Start from the top */
-}
-circle {
-  fill: #4caf50; /* Better contrasting green */
-  stroke-width: 3; /* Thinner stroke for a less bulky look */
-}
-
-circle:first-child {
-  stroke: #ddd; /* Background circle */
-}
-
-.circle-progress {
-  stroke: #00bcd4; /* Fancy progress color (light blue) */
-  stroke-dasharray: 110;
-  stroke-dashoffset: 0;
-  transition: stroke-dashoffset 1s linear, stroke 0.5s ease-in-out;
-}
-/* Time remaining text inside the circle */
-.circle-text {
-  position: absolute;
+/* Fullscreen image on click */
+.jdl-media img.enlarged {
+  position: fixed;
   top: 50%;
   left: 50%;
-  transform: translate(-50%, -50%);
-  font-size: 10px;
-  color: #fff;
-  font-weight: bold;
-}
-/* Custom Popover container */
-/* Custom Popover container */
-.custom-popover {
-  position: absolute;
-  top: 0; /* Start from the top of the post */
-  left: 0; /* Start from the left of the post */
-  width: 50%; /* Extend to the full width of the post */
-  height: 72%; /* Extend to the full height of the post */
-  background-color: #fff; /* Background color for the popover */
-  border-radius: 12px; /* Smooth rounded corners */
-  box-shadow: 0 8px 16px rgba(0, 0, 0, 0.15); /* Softer and more prominent shadow */
-  z-index: 1000; /* Ensure it's above other elements */
-  opacity: 0;
-  transform: translateY(-10px);
-  transition: opacity 0.3s ease, transform 0.3s ease, visibility 0.3s ease;
-  visibility: hidden; /* Initially hidden */
-  overflow-y: auto; /* Add scrollbar when content overflows */
+  transform: translate(-50%, -50%) scale(1);
+  width: auto;
+  max-width: 95vw;
+  max-height: 95vh;
+  z-index: 2001;
+  border-radius: 12px;
+  object-fit: contain;
+  box-shadow: 0 0 30px rgba(0,0,0,0.8),
+              0 0 20px rgba(255,255,255,0.2);
+  transition: all 0.35s ease-in-out;
+  cursor: zoom-out;
 }
 
-/* Show the popover */
-.custom-popover.show {
-  opacity: 1;
-  transform: translateY(0);
-  visibility: visible;
+/* Dark backdrop when enlarged */
+.jdl-media img.enlarged::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.8);
+  z-index: -1;
+}
+/* 1) Allow the enlarged image to escape all containers and sit on the viewport */
+.jdl-media:has(img.enlarged) {
+  overflow: visible;           /* stop clipping inside the card */
+  z-index: 2000;               /* create a high stacking context */
 }
 
-/* Dropdown Items */
-.visibility-dropdown ion-item {
-  padding: 7px 4px;
-  font-size: 10px;
-  transition: background-color 0.3s ease, color 0.3s ease;
-  display: flex;
-  align-items: center;
-  border-bottom: 1px solid #eee;
+/* 2) Fullscreen the image itself */
+.jdl-media img.enlarged {
+  position: fixed;             /* relative to the viewport */
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%) scale(1);
+  width: auto;
+  max-width: 95vw;
+  max-height: 95vh;
+  object-fit: contain;
+  border-radius: 14px;
+  z-index: 2001;
+  cursor: zoom-out;
+
+  /* glow */
+  box-shadow:
+    0 0 40px rgba(0, 0, 0, 0.85),
+    0 0 24px rgba(255, 255, 255, 0.18);
+  transition: transform .3s ease, box-shadow .3s ease;
 }
 
-.visibility-dropdown ion-item:last-child {
-  border-bottom: none;
+/* 3) Backdrop behind the fullscreen image (can't use ::before on <img>) */
+.jdl-media::after {
+  content: "";
+  display: none;
+}
+.jdl-media:has(img.enlarged)::after {
+  display: block;
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.82);
+  backdrop-filter: blur(1px);
+  z-index: 2000;
 }
 
-.visibility-dropdown ion-item:hover {
-  background-color: #f7f7f7;
-  color: #333;
+/* 4) Optional: avoid any parent clipping just in case */
+.jodel-card { overflow: visible; }
+
+/* meta (compact chips) */
+.jdl-meta{display:grid;gap:4px;margin:2px 0 6px}
+.jdl-meta div{
+  font-size:12.5px; padding:6px 8px; border-radius:10px;
+  background: rgba(255,255,255,.14); /* subtle overlay on colored bg */
 }
 
-.visibility-dropdown ion-icon {
-  color: #666;
-  font-size: 14px;
-  margin-right: 12px;
+
+/* media */
+.jdl-media{position:relative;border-radius:12px;overflow:hidden}
+.jdl-media img, .jdl-media video{width:100%;display:block;max-height:180px;object-fit:cover;border-radius:12px}
+.jdl-media img.enlarged{max-height:none}
+.expiry-badge{
+  position:absolute; right:8px; top:8px;
+  font-size:11px; font-weight:700;
+  background:#fff; color:#111; border-radius:999px;
+  padding:4px 7px; box-shadow:0 4px 10px rgba(0,0,0,.15);
 }
 
-.visibility-dropdown ion-label {
-  font-size: 16px;
-  color: #333;
-  font-weight: 500;
+/* actions bar (Jodel-like) */
+.jdl-actions{
+  display:flex; align-items:center; gap:6px;
+  margin-top:6px; padding-top:6px;
+  border-top: 1px solid rgba(0,0,0,.06);
 }
+.score{font-weight:700; font-size:13px; padding:0 2px; min-width:18px; text-align:center}
+.c-count{font-size:13px; margin-left:6px; opacity:.9}
+.spacer{flex:1}
 
-/* Add smooth animations */
-.custom-popover {
-  transition: transform 0.3s ease-in-out, opacity 0.3s ease-in-out;
+/* popover (keeps your logic but smaller) */
+.rel{position:relative}
+.custom-popover{
+  position:absolute; top:32px; right:0; width:170px; background:#fff;
+  border-radius:12px; box-shadow:0 14px 28px rgba(0,0,0,.18);
+  z-index:1000; opacity:0; transform:translateY(-6px); visibility:hidden;
+  transition:opacity .2s ease, transform .2s ease, visibility .2s ease;
 }
+.custom-popover.show{opacity:1;visibility:visible;transform:translateY(0)}
+.visibility-dropdown ion-item{
+  --padding-start:12px;--padding-end:12px;--min-height:38px;font-size:14px;
+  border-bottom:1px solid #f2f2f2;
+}
+.visibility-dropdown ion-item:last-child{border-bottom:none}
 
-.custom-popover.show {
-  opacity: 1;
-  transform: translateY(0);
-}
-
-.custom-popover.hide {
-  opacity: 0;
-  transform: translateY(-10px);
-}
+/* small tweaks */
+.jdl-card .far,.jdl-card .fas{font-size:16px}

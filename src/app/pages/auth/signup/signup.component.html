@@ -116,64 +116,58 @@
           <div *ngIf="steps[step] == 'location'">
             <h2>Almost done!</h2>
             <h2 class="my-0">Where do you live?</h2>
-            <ion-item class="w-100 mt-3">
-              <div class="w-100 h-100">
-                <ion-button
-                  expand="block"
-                  fill="clear"
-                  color="dark"
-                  size="default"
-                  class="ion-no-padding ion-no-margin text-capitalize h-100"
-                  (click)="presentCountriesModal()"
-                >
-                  <span class="w-100 my-3 ml-2 text-left country-btn">
-                    {{ selectedCountry ? selectedCountry : 'Country' }}
-                  </span>
-                </ion-button>
-              </div>
+            <ion-item button (click)="presentCountriesModal()">
+              <ion-label [class.placeholder]="!((selectedCountry || '').trim())">
+                {{ (selectedCountry || '').trim() || 'Country' }}
+              </ion-label>
+              <ion-icon slot="end" name="chevron-down"></ion-icon>
             </ion-item>
-            <div class="w-100 text-center mt-4" *ngIf="validationErrors['country']">
-              <span class="d-block text-danger" *ngFor="let error of validationErrors['country']">{{ error }}</span>
-            </div>
-            <ion-item class="w-100 mt-3">
-              <div class="w-100 h-100">
-                <ion-button
-                  expand="block"
-                  fill="clear"
-                  color="dark"
-                  size="default"
-                  class="ion-no-padding ion-no-margin text-capitalize h-100"
-                  (click)="presentCitiesModal()"
-                  [disabled]="!selectedCountry"
-                >
-                  <span class="w-100 my-3 ml-2 text-left country-btn">
-                    {{ selectedCity ? selectedCity : 'City' }}
-                  </span>
-                </ion-button>
-              </div>
+            
+            <!-- City -->
+            <ion-item button (click)="presentCitiesModal()" [disabled]="!selectedCountry || !cities?.length">
+              <ion-label [class.placeholder]="!((selectedCity || '').trim())">
+                {{ (selectedCity || '').trim() || 'City' }}
+              </ion-label>
+              <ion-icon slot="end" name="chevron-down"></ion-icon>
             </ion-item>
+
             <div class="w-100 text-center mt-4" *ngIf="validationErrors['city']">
               <span class="d-block text-danger" *ngFor="let error of validationErrors['city']">{{ error }}</span>
             </div>
           </div>
-
           <div class="form-group" *ngIf="steps[step] == 'school'">
             <h2>What is your School? (Optional)</h2>
-            <ion-item class="w-100">
-              <ion-button
-                expand="block"
-                fill="clear"
-                color="dark"
-                size="default"
-                class="ion-no-padding ion-no-margin text-capitalize h-100"
-                (click)="presentSchoolsModal()"
-              >
-                <span class="w-100 my-3 ml-2 text-left country-btn">
-                  {{ form.get('school').value ? form.get('school').value : 'Select your School' }}
-                </span>
-              </ion-button>
-            </ion-item>
+          
+            <!-- NEW: Country of Study -->
+          <!-- Country of Study -->
+<ion-item button (click)="presentStudyCountriesModal()">
+  <ion-label>{{ selectedStudyCountry || 'Country of Study' }}</ion-label>
+  <ion-icon slot="end" name="chevron-down"></ion-icon>
+</ion-item>
+
+<!-- School -->
+<ion-item
+  button
+  (click)="presentSchoolsModal()"
+  [disabled]="!selectedStudyCountry || isLoadingSchools || !schools.length">
+  <ion-label>
+    {{ form.get('school')?.value
+        || (selectedStudyCountry ? 'Select your School' : 'Select country first') }}
+  </ion-label>
+  <ion-icon slot="end" name="chevron-down"></ion-icon>
+</ion-item>
+
+<ion-spinner *ngIf="isLoadingSchools" name="dots" class="mt-2"></ion-spinner>
+
+          
+
+<ion-spinner *ngIf="isLoadingSchools" name="dots" class="mt-2"></ion-spinner>
+<ion-note *ngIf="selectedStudyCountry && !isLoadingSchools && !schools.length" color="medium">
+  No universities found for {{ selectedStudyCountry }}.
+</ion-note>
+
           </div>
+          
 
           <div class="form-group" *ngIf="steps[step] == 'education'">
             <h2>What's your Education level? (Optional)</h2>

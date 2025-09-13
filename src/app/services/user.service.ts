@@ -150,7 +150,7 @@ getCurrentUserId(): string | null {
   }
 
   refreshFriendsList(): Promise<any> { // Add this method to refresh friends list
-    return this.http.get(`${this.apiUrl}/user/friends`).toPromise();
+    return this.http.get(`${this.apiUrl}/friends`).toPromise();
   }
 
   getPartnerPeerId(userId: string): Observable<string | null> {

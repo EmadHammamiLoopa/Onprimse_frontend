@@ -27,6 +27,11 @@ export class FormComponent implements OnInit {
   countries = [];
   selectedCountry = '';
 
+  // fields
+studyCountries: string[] = [];
+selectedStudyCountry = '';
+
+
   cities = [];
   selectedCity = '';
 
@@ -61,6 +66,7 @@ export class FormComponent implements OnInit {
       lastName: [''],
       birthDate: ['', Validators.required], // Ensure Validators.required is set
       gender: [''],
+      studyCountry: [''],            // <-- NEW
       school: [''],
       education: [''],
       country: [''],
@@ -119,6 +125,7 @@ export class FormComponent implements OnInit {
         lastName: this.user.lastName,
         birthDate: this.user.birthDate ? this.user.birthDate.toISOString().substring(0, 10) : '',
         gender: this.user.gender,
+        studyCountry: (this.user as any).studyCountry || '',   // <-- NEW (if available)
         country: this.user.country,
         city: this.user.city,
         school: this.user.school,
@@ -132,7 +139,12 @@ export class FormComponent implements OnInit {
       this.selectedCity = this.user.city;
       this.selectedProfession = this.user.profession;
       this.selectedInterests = this.user.interests || [];
+      this.selectedStudyCountry = (this.user as any).studyCountry || '';
+      if (this.selectedStudyCountry) {
+        this.loadUniversities();
+      }
     }
+    
     this.pageLoading = false;
     // Save the user data to localStorage to ensure it persists
     localStorage.setItem('user', JSON.stringify(this.user));
@@ -146,10 +158,12 @@ export class FormComponent implements OnInit {
         } else {
           this.countries = Object.keys(resp).map(key => ({ name: key, values: resp[key] }));
         }
+        // reuse the same list for study countries
+        this.studyCountries = Array.isArray(this.countries)
+          ? this.countries.map((c: any) => (c.name ?? c)) // normalize to names
+          : [];
       },
-      (error) => {
-        console.error('Error fetching countries:', error);
-      }
+      (error) => console.error('Error fetching countries:', error)
     );
 
     this.jsonService.getProfessions().then(
@@ -178,15 +192,18 @@ export class FormComponent implements OnInit {
         console.error('Error fetching interests:', error);
       }
     );
-
-    this.loadUniversities();
   }
 
   loadUniversities() {
-    this.schoolService.getUniversities().subscribe((response: any) => {
-      this.schools = response.map((school: any) => school.name);
+    if (!this.selectedStudyCountry) {
+      this.schools = [];
+      return;
+    }
+    this.schoolService.getUniversityNames(this.selectedStudyCountry).subscribe((names: string[]) => {
+      this.schools = names;
     });
   }
+  
 
   async presentModal(data: any[], title: string, multiSelect: boolean = false) {
     let modalData = data;

@@ -39,32 +39,32 @@
 
   <div *ngIf="user && !pageLoading">
     <div class="profile-header">
-      <div class="main-avatar" *ngIf="user?.getMainAvatar()">
-        <!-- Display avatar only if it exists -->
-        <img [src]="sanitizeUrl(user?.getMainAvatar())" class="profile-avatar-big" alt="Main Avatar">
-        <ion-button *ngIf="myProfile && !isDefaultAvatar(mainAvatar)" size="small" color="danger" (click)="removeAvatar(mainAvatar)" style="position: absolute; left: -20px; top: 10px;">
-          <ion-icon name="trash-bin-sharp"></ion-icon>
-        </ion-button>
+      <!-- Main avatar only (no list here) -->
+      <div class="main-avatar" *ngIf="mainAvatar">
+        <img [src]="avatarUrl(mainAvatar)" class="profile-avatar-big" alt="Main Avatar" />
       </div>
 
-      <div class="avatar-gallery" *ngIf="user?.avatar && user.avatar.length > 0">
-        <ion-slides pager="true" [options]="{ freeMode: true, slidesPerView: 'auto', spaceBetween: 10 }">
-          <ion-slide *ngFor="let avatar of user.avatar">
-            <ng-container *ngIf="!isDefaultAvatar(avatar)">
-              <img [src]="sanitizeUrl(avatar)" class="profile-avatar-small" alt="Avatar Option">
-              <div class="avatar-actions">
-                <ion-button *ngIf="myProfile && mainAvatar !== avatar" size="small" color="primary" (click)="changeMainAvatar(avatar)">
-                  <ion-icon name="checkmark-outline"></ion-icon>
-                </ion-button>
-                <ion-button *ngIf="myProfile" size="small" color="danger" (click)="removeAvatar(avatar)">
-                  <ion-icon name="trash-outline"></ion-icon>
-                </ion-button>
-              </div>
-            </ng-container>
+      <!-- Gallery (single place where avatars are listed) -->
+      <div class="avatar-gallery" *ngIf="user?.avatar?.length">
+        <ion-slides pager="true" [options]="{ freeMode:true, slidesPerView:'auto', spaceBetween:10 }">
+          <ion-slide *ngFor="let avatar of user.avatar; trackBy: trackByAvatar">
+            <img [src]="avatarUrl(avatar)" class="profile-avatar-small" alt="Avatar Option" />
+            <div class="avatar-actions">
+              <ion-button *ngIf="myProfile && mainAvatar !== avatar"
+                          size="small" color="primary"
+                          (click)="changeMainAvatar(avatar)">
+                <ion-icon name="checkmark-outline"></ion-icon>
+              </ion-button>
+              <ion-button *ngIf="myProfile"
+                          size="small" color="danger"
+                          (click)="removeAvatar(avatar)">
+                <ion-icon name="trash-outline"></ion-icon>
+              </ion-button>
+            </div>
           </ion-slide>
         </ion-slides>
       </div>
-    </div> <!-- Closing the profile-header div -->
+    </div>
 
     <div class="user-info">
       <h1>{{ user.fullName }}<span *ngIf="user.getAge(myProfile) !== null">, {{ user.getAge(myProfile) }}</span></h1>

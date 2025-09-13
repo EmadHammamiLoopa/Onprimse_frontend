@@ -1,6 +1,6 @@
 import { AndroidPermissions } from '@ionic-native/android-permissions/ngx';
 import { Platform } from '@ionic/angular';
-import { ElementRef, Injectable } from '@angular/core';
+import { ElementRef, Injectable, NgZone } from '@angular/core';
 import Peer, { MediaConnection, PeerJSOption } from 'peerjs';
 import { PermissionService } from './permission.service';
 import { Router } from '@angular/router';
@@ -11,7 +11,7 @@ import { User } from '../models/User';
 import { SocketService } from './socket.service';
 import { NativeStorage } from '@ionic-native/native-storage/ngx';
 import { DeviceManagerService } from './device-manager.service';
-
+import { VideoEvents } from '../pages/messages/chat/video/events';
 
 interface MissedCall {
   userId: string;
@@ -19,58 +19,58 @@ interface MissedCall {
   timestamp: string;
   userAvatar?: string;
 }
+type MaybeWrapped<T> = T | { data: T };
 
-@Injectable({
-  providedIn: 'root'
-})
+function unwrapUser(resp: MaybeWrapped<User>): User {
+  const anyResp = resp as any;
+  return (anyResp && typeof anyResp === 'object' && 'data' in anyResp)
+    ? (anyResp.data as User)
+    : (resp as User);
+}
 
-
+@Injectable({ providedIn: 'root' })
 export class WebrtcService {
   static peer: Peer;
   myStream: MediaStream;
-  public myEl!: HTMLVideoElement;
-  public partnerEl!: HTMLVideoElement;
-  
-  user: User = new User(); // ✅ Added `user` property here
+  public myEl?: HTMLVideoElement;
+  public partnerEl?: HTMLVideoElement;
+  private latestRemoteStream: MediaStream | null = null;
+  user: User = new User(); // ✅ Added user property here
   private peerHeartbeatInterval: any;
-  private missedCalls = new BehaviorSubject<MissedCall[]>([]);
-  public  missedCalls$ = new BehaviorSubject<MissedCall[]>([]);
+  private missedCallsSubject = new BehaviorSubject<MissedCall[]>([]);
+  public missedCalls$ = this.missedCallsSubject.asObservable();
   private deviceChangeListener: () => void;
   private activeStreams: Map<string, MediaStream> = new Map(); // Track streams by tabId
   private tabId = Math.random().toString(36).substring(2, 9); // Unique tab ID
   private isClosed = false;
   private activeDevices: { video?: string, audio?: string } = {};
   private deviceLockChannel?: BroadcastChannel;
-  userId: string;
-myPeerId: string;
-public peer: Peer | null = null;
-public localStream: MediaStream | null = null;
+  myPeerId: string;
+  public localStream: MediaStream | null = null;
   stun = 'stun.l.google.com:19302';
   mediaConnection: MediaConnection;
   options: PeerJSOption;
-  stunServer: RTCIceServer = {
-    urls: 'stun:' + this.stun,
-  };
+  stunServer: RTCIceServer = { urls: 'stun:' + this.stun, };
   static call;
   facingMode = "user";
+  public partnerId?: string;
+  public userId?: string;
+  private missedHandlersBound = false;
 
-  
   constructor(
-    private androidPermission: AndroidPermissions, 
-    private permissionService: PermissionService, 
+    private androidPermission: AndroidPermissions,
+    private permissionService: PermissionService,
     private router: Router,
     private nativeStorage: NativeStorage,
     private socketService: SocketService,
     private userService: UserService,
     private toastService: ToastService,
+    private zone: NgZone,
     private deviceManager: DeviceManagerService
   ) {
-    this.options = {
-      key: 'cd1ft79ro8g833di',
-      debug: 3
-    };
+    this.options = { key: 'cd1ft79ro8g833di', debug: 3 };
     this.loadMissedCallsFromStorage();
-  
+
     // Safely set up device change listener
     if (typeof navigator !== 'undefined' && navigator.mediaDevices) {
       this.deviceChangeListener = () => {
@@ -81,6 +81,7 @@ public localStream: MediaStream | null = null;
     } else {
       console.warn('MediaDevices API not available');
     }
+
     if (typeof BroadcastChannel !== 'undefined') {
       this.deviceLockChannel = new BroadcastChannel('device_locks');
       this.deviceLockChannel.onmessage = (event) => {
@@ -89,11 +90,9 @@ public localStream: MediaStream | null = null;
         }
       };
     }
-  
-    
   }
-  
-  private delay  = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
+  private delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
   // 🔁 Retry getUserMedia in case of temporary device lock
   private async tryGetMediaStreamWithRetries(
@@ -107,7 +106,7 @@ public localStream: MediaStream | null = null;
       } catch (error) {
         if (i === retries - 1) throw error;
         console.warn(`🔁 Retry (${i + 1}) after error:`, error);
-        await this.delay (delay);
+        await this.delay(delay);
       }
     }
     throw new Error("Failed to get media stream after retries");
@@ -116,40 +115,36 @@ public localStream: MediaStream | null = null;
   // ✅ Main function: acquire stream with specific devices and tab locking
   async getStreamForTabWithDeviceIds(videoId: string, audioId: string, tabId: string): Promise<MediaStream | null> {
     console.log(`[webrtc] 🎥 trying getUserMedia with:\n→ video deviceId: ${videoId}\n→ audio deviceId: ${audioId}\n→ tabId: ${tabId}`);
-  
+
     // 1. Release any currently active stream
     if (this.myStream) {
       console.log('[webrtc] 🔁 Releasing previous stream');
       this.myStream.getTracks().forEach(track => track.stop());
       this.myStream = null;
     }
-  
+
     // 2. Check if devices are locked
     const isVideoAvailable = await this.deviceManager.acquireDevice(videoId, tabId);
     const isAudioAvailable = await this.deviceManager.acquireDevice(audioId, tabId);
-  
     if (!isVideoAvailable || !isAudioAvailable) {
       console.warn('🔒 One or both devices are locked by another tab.');
       return null;
     }
-  
+
     // 3. Try to get media stream with retries
     const MAX_RETRIES = 3;
     let attempts = 0;
-  
     while (attempts < MAX_RETRIES) {
       try {
         const stream = await navigator.mediaDevices.getUserMedia({
           video: { deviceId: { exact: videoId } },
           audio: { deviceId: { exact: audioId } }
         });
-  
         this.myStream = stream;
         console.log('[webrtc] ✅ Acquired stream successfully.');
         return stream;
       } catch (error: any) {
         attempts++;
-  
         if (error.name === 'OverconstrainedError') {
           console.warn(`🔁 Retry (${attempts}) after OverconstrainedError for tab ${tabId}`);
           await this.delay(500); // delay between retries
@@ -159,135 +154,208 @@ public localStream: MediaStream | null = null;
         }
       }
     }
-  
+
     // 4. Release the locks if acquisition failed
     this.deviceManager.releaseDevice(videoId, tabId);
     this.deviceManager.releaseDevice(audioId, tabId);
+
     return null;
   }
-  
-
   ngOnDestroy() {
     // Clean up device change listener
     if (this.deviceChangeListener && navigator.mediaDevices) {
       navigator.mediaDevices.removeEventListener('devicechange', this.deviceChangeListener);
     }
-    
+
     // Clean up BroadcastChannel
     if (this.deviceLockChannel) {
       this.deviceLockChannel.close();
     }
-    
+
     // Ensure all resources are released
     this.close();
   }
 
-  startCall(partnerId: string): void {
-    if (!this.peer || !this.localStream) {
-      console.warn("⛔ Cannot start call: Peer or localStream missing");
-      return;
-    }
-  
-    const call = this.peer.call(partnerId, this.localStream);
-    console.log("📞 Calling", partnerId);
-  
-    call.on('stream', (remoteStream) => {
-      console.log("📡 Received remote stream");
-      // Assign remoteStream to partnerEl in VideoComponent if needed
-    });
-  
-    call.on('close', () => {
-      console.log("🔚 Call closed");
-    });
-  
-    call.on('error', (err) => {
-      console.error("❌ Call error:", err);
-    });
+  private get peer(): Peer {
+    return WebrtcService.peer;
   }
 
-public async getOptimalMediaStream(): Promise<MediaStream> {
-  try {
-    // Get available devices with locking
-    const videoDeviceId = await this.deviceManager.getAvailableDevice('videoinput', this.tabId);
-    const audioDeviceId = await this.deviceManager.getAvailableDevice('audioinput', this.tabId);
-
-    if (!videoDeviceId || !audioDeviceId) {
-      throw new Error('All devices are currently in use');
+  /** Start an outgoing call and keep a reference to it */
+  /** webrtc.service.ts ───────────────────────────────────────────────────
+   * Start an outgoing video-call. (user-id → peer-id)
+   * – guarantees our own PeerJS instance is OPEN
+   * – resolves the partner’s current peer-id
+   * – pings the peer before dialling
+   * – emits the “video-call-started” socket event
+   * – returns the MediaConnection so the caller can attach <stream> events
+   * */
+  public async startCall(
+    partnerUserId : string, // <-- pass USER-ID here
+    localStream : MediaStream // <-- already opened camera/mic
+  ): Promise<MediaConnection> {
+    this.isClosed = false; // ✅ allow reinitialization
+    if (!WebrtcService.peer) {
+      await this.createPeer(this.userId); // fallback
     }
 
-    // Store the acquired device IDs
-    this.activeDevices = {
-      video: videoDeviceId,
-      audio: audioDeviceId
-    };
+    /* 0 — sanity checks -------------------------------------------------- */
+    if (!localStream) {
+      throw new Error('Local MediaStream missing');
+    }
+    if (!this.userId) {
+      throw new Error('auth userId not set');
+    }
 
-    console.log('Using devices:', {
-      video: videoDeviceId,
-      audio: audioDeviceId
-    });
+    /* 1 — make sure *our* peer is ready --------------------------------- */
+    await this.createPeer(this.userId); // no-op if it already exists
+    await this.waitForPeerOpen(); // throws after 10 s timeout
 
-    // Create stream with acquired devices
-    const stream = await navigator.mediaDevices.getUserMedia({
-      video: { deviceId: { exact: videoDeviceId } },
-      audio: { deviceId: { exact: audioDeviceId } }
-    });
+    /* 2 — look-up partner’s current peer-id ------------------------------ */
+    const partnerPeerId = await this.userService
+      .getPartnerPeerId(partnerUserId)
+      .toPromise();
+    if (!partnerPeerId) {
+      throw new Error('Partner is offline or has no peer-id');
+    }
 
-    // Log the actual devices being used
-    stream.getTracks().forEach(track => {
-      const settings = track.getSettings();
-      console.log(`Active ${track.kind}:`, {
-        deviceId: settings.deviceId,
-        label: track.label,
-        ...settings
-      });
-    });
 
-    return stream;
-  } catch (error) {
-    console.error('Error acquiring optimal media stream:', error);
+
+    /* 4 — dial! ---------------------------------------------------------- */
+    const mc = this.peer.call(
+      partnerPeerId,
+      localStream,
+      { sdpTransform: preferVp8 } // keep the VP8 tweak
+    );
+    WebrtcService.call = mc; // store globally
+
+    const connected = () => this.callState.next({ connected: true, type: 'caller' });
+    let remoteAttached = false;
     
-    // Fallback strategy with device locking
+    mc.once('stream', (remote) => {
+      if (remoteAttached) return;
+      remoteAttached = true;
+      this.attachRemoteStream(this.partnerEl!, remote, connected);
+    });
+    
+    mc.peerConnection?.addEventListener('track', (ev) => {
+      const [remote] = ev.streams;
+      if (remote && !remoteAttached) {
+        remoteAttached = true;
+        this.attachRemoteStream(this.partnerEl!, remote, connected);
+      }
+    });
+    
+
+    /* 5 — emit “video-call-started” via socket --------------------------- */
     try {
-      console.log('Attempting fallback with relaxed constraints');
-      const fallbackStream = await this.getFallbackMediaStream();
-      
-      // Update active devices with whatever worked in fallback
-      fallbackStream.getTracks().forEach(track => {
-        const settings = track.getSettings();
-        if (track.kind === 'video') {
-          this.activeDevices.video = settings.deviceId;
-        } else if (track.kind === 'audio') {
-          this.activeDevices.audio = settings.deviceId;
-        }
+      const sock = await SocketService.getSocket(); // static helper in your svc
+      sock?.emit('video-call-started', {
+        from : this.userId,
+        to : partnerUserId,
+        myPeerId : this.getPeerId(),
+        partnerPeerId
       });
-      
-      return fallbackStream;
-    } catch (fallbackError) {
-      console.error('Fallback media acquisition failed:', fallbackError);
-      throw new Error('Could not acquire any media devices. Please check your camera and microphone permissions.');
+    } catch {
+      /* socket not critical – ignore */
+    }
+
+    return mc;
+  }
+
+  public async getOptimalMediaStream(): Promise<MediaStream> {
+    try {
+      // Get available devices with locking
+      const videoDeviceId = await this.deviceManager.getAvailableDevice('videoinput', this.tabId);
+      const audioDeviceId = await this.deviceManager.getAvailableDevice('audioinput', this.tabId);
+      if (!videoDeviceId || !audioDeviceId) {
+        throw new Error('All devices are currently in use');
+      }
+
+      // Store the acquired device IDs
+      this.activeDevices = { video: videoDeviceId, audio: audioDeviceId };
+      console.log('Using devices:', { video: videoDeviceId, audio: audioDeviceId });
+
+      // Create stream with acquired devices
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: {
+          width: { ideal: 640, max: 640 },
+          height: { ideal: 480, max: 480 },
+          frameRate: { ideal: 15, max: 30 },
+          deviceId: { exact: videoDeviceId }
+        },
+        audio: { deviceId: { exact: audioDeviceId } }
+      });
+
+      // Log the actual devices being used
+      stream.getTracks().forEach(track => {
+        const settings = track.getSettings();
+        console.log(`Active ${track.kind}:`, {
+          deviceId: settings.deviceId,
+          label: track.label,
+          ...settings
+        });
+      });
+
+      return stream;
+    } catch (error) {
+      console.error('Error acquiring optimal media stream:', error);
+
+      // Fallback strategy with device locking
+      try {
+        console.log('Attempting fallback with relaxed constraints');
+        const fallbackStream = await this.getFallbackMediaStream();
+
+        // Update active devices with whatever worked in fallback
+        fallbackStream.getTracks().forEach(track => {
+          const settings = track.getSettings();
+          if (track.kind === 'video') {
+            this.activeDevices.video = settings.deviceId;
+          } else if (track.kind === 'audio') {
+            this.activeDevices.audio = settings.deviceId;
+          }
+        });
+
+        return fallbackStream;
+      } catch (fallbackError) {
+        console.error('Fallback media acquisition failed:', fallbackError);
+        throw new Error(
+          'Could not acquire any media devices. Please check your camera and microphone permissions.'
+        );
+      }
     }
   }
-}
-  
 
-public async listAllMediaDevices(): Promise<void> {
-  try {
-    const devices = await navigator.mediaDevices.enumerateDevices();
+  public setVideoElements(my: HTMLVideoElement, partner: HTMLVideoElement) {
+    this.myEl = my;
+    this.partnerEl = partner;
 
-    console.log("📷📢 Available media devices:");
-    devices.forEach((device, index) => {
-      console.log(`[${index}] ${device.kind}: "${device.label || '(label hidden)'}" (deviceId: ${device.deviceId})`);
-    });
-  } catch (err) {
-    console.error("❌ Failed to list media devices:", err);
+    /* replay local stream (after navigation) */
+    if (this.myStream) this.myEl.srcObject = this.myStream;
+
+    /* replay remote stream (after navigation) */
+    if (this.latestRemoteStream) this.partnerEl.srcObject = this.latestRemoteStream;
   }
-}
+
+  public clearVideoElements() {
+    this.myEl = this.partnerEl = undefined;
+  }
+  public async listAllMediaDevices(): Promise<void> {
+    try {
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      console.log("📷📢 Available media devices:");
+      devices.forEach((device, index) => {
+        console.log(`[${index}] ${device.kind}: "${device.label || '(label hidden)'}" (deviceId: ${device.deviceId})`);
+      });
+    } catch (err) {
+      console.error("❌ Failed to list media devices:", err);
+    }
+  }
 
   private async getFallbackMediaStream(): Promise<MediaStream> {
     const devices = await navigator.mediaDevices.enumerateDevices();
     const videoDevices = devices.filter(d => d.kind === 'videoinput');
     const audioDevices = devices.filter(d => d.kind === 'audioinput');
-  
+
     // Try each video device until one works
     for (const videoDevice of videoDevices) {
       try {
@@ -300,7 +368,7 @@ public async listAllMediaDevices(): Promise<void> {
         console.log(`Video device ${videoDevice.deviceId} failed, trying next...`);
       }
     }
-  
+
     // If all video devices failed, try audio only
     for (const audioDevice of audioDevices) {
       try {
@@ -313,73 +381,130 @@ public async listAllMediaDevices(): Promise<void> {
         console.log(`Audio device ${audioDevice.deviceId} failed, trying next...`);
       }
     }
-  
+
     throw new Error('No available media devices found');
   }
-  
 
   public getMissedCalls(): MissedCall[] {
-    return this.missedCalls.value;
+    return this.missedCallsSubject.value;
   }
-  
+
   // Update registerMissedCall to prevent duplicates and include names
-  async registerMissedCall(userId: string): Promise<void> {
+  public async registerMissedCall(userId: string): Promise<void> {
     try {
-      const currentCalls = this.missedCalls.value;
-      
-      // Check if call already exists for this user
-      if (currentCalls.some(call => call.userId === userId)) {
-        console.log(`Call from ${userId} already registered`);
-        return;
-      }
+      const current = this.missedCallsSubject.value || [];
+      const now = Date.now();
+      if (current.some(c => c.userId === userId && now - new Date(c.timestamp).getTime() < 60_000)) return;
   
-      // Get user details
-      const user = await this.userService.getUserProfile(userId).toPromise();
-      const newCall: MissedCall = {
+      let userName: string | undefined;
+      let userAvatar: string | undefined;
+      try {
+        const resp = await this.userService.getUserProfile(userId).toPromise();
+        const u = unwrapUser(resp as MaybeWrapped<User>);
+        userName   = `${u?.firstName ?? ''} ${u?.lastName ?? ''}`.trim() || undefined;
+        userAvatar = u?.mainAvatar;
+      } catch {}
+  
+      const newCall = {
         userId,
-        userName: user ? `${user.firstName} ${user.lastName}` : `User ${userId.substring(0, 6)}`,
-        userAvatar: user?.mainAvatar,
-        timestamp: new Date().toISOString()
+        userName: userName || `User ${userId.slice(0, 6)}`,
+        userAvatar,
+        timestamp: new Date().toISOString(),
       };
   
-      const updatedCalls = [newCall, ...currentCalls];
-      localStorage.setItem('missedCalls', JSON.stringify(updatedCalls));
-      this.missedCalls.next(updatedCalls);
-      
-      console.log(`Registered missed call from ${newCall.userName}`);
-    } catch (error) {
-      console.error('Error registering missed call:', error);
+      const updated = [newCall, ...current];
+      localStorage.setItem('missedCalls', JSON.stringify(updated));
+  
+      this.zone.run(() => this.missedCallsSubject.next(updated));  // ⬅ important
+      console.log('📒 missed-call stored:', newCall);
+    } catch (e) {
+      console.error('Error registering missed call:', e);
     }
   }
-  
   // Update clearMissedCalls
   clearMissedCalls(): void {
     localStorage.removeItem('missedCalls');
-    this.missedCalls.next([]);
-    console.log('Cleared all missed calls');
+    this.zone.run(() => this.missedCallsSubject.next([]));          // ⬅ important
   }
+
+  public addMissedCall(call: MissedCall): void {
+    const current = this.missedCallsSubject.value || [];
+    const isDup = current.some(c =>
+      c.userId === call.userId &&
+      Math.abs(new Date(c.timestamp).getTime() - new Date(call.timestamp).getTime()) < 60_000
+    );
+    if (isDup) return;
   
-  // Update loadMissedCallsFromStorage
+    const updated = [call, ...current];
+    localStorage.setItem('missedCalls', JSON.stringify(updated));
+    this.zone.run(() => this.missedCallsSubject.next(updated));     // ⬅ important
+  }
+
+  // webrtc.service.ts
+  addMissedCallFromSignaling(ev: any, myId: string) {
+    const callerId = ev.callerId ?? ev.from;
+    const calleeId = ev.calleeId ?? ev.to;
+    const reason = ev.reason ?? ev.type; // 'cancel' | 'timeout' | ...
+    const iAmCallee = myId === calleeId;
+    const isMissed = reason === 'timeout' || reason === 'cancel';
+    if (!(iAmCallee && isMissed)) return; // <-- ignore for caller
+
+    this.addMissedCall({
+      userId: callerId,
+      userName: ev.callerName ?? ev.fromName ?? 'Unknown',
+      timestamp: ev.at ?? new Date().toISOString()
+    });
+  }
+
   loadMissedCallsFromStorage(): void {
     try {
       const stored = localStorage.getItem('missedCalls');
       const parsed: MissedCall[] = stored ? JSON.parse(stored) : [];
-      this.missedCalls.next(parsed);
-    } catch (error) {
-      console.error('Error loading missed calls:', error);
-      this.missedCalls.next([]);
+      this.zone.run(() => this.missedCallsSubject.next(parsed));    // ⬅ important
+    } catch (err) {
+      console.error('Error loading missed calls:', err);
+      this.zone.run(() => this.missedCallsSubject.next([]));        // ⬅ important
     }
   }
 
+// change signature
+public async bindMissedCallSocketHandlers() {
+  const sock = await SocketService.getSocket();
+  if (!sock || this.missedHandlersBound) return;
+
+  const asReceiver = (ev: any) => {
+    const toId = ev?.to?._id || ev?.to;
+    const fromId = ev?.from?._id || ev?.from;
+    if (!this.userId || !toId || !fromId) return;
+    if (toId !== this.userId) return;         // only the callee records
+    console.log('[missed][svc] event →', ev?.type || ev?.reason || 'unknown', 'from', fromId);
+
+    this.registerMissedCall(fromId);
+  };
+
+  const names = [
+    'video-canceled',
+    'video-call-cancelled',
+    'cancel-video',            // ⬅ add this
+    'video-call-timeout',
+    'missed-call',
+    VideoEvents.CANCELED as any,
+    VideoEvents.TIMEOUT as any,
+    VideoEvents.MISSED as any,
+  ];
+
+  names.forEach(n => sock.off(n));
+  names.forEach(n => sock.on(n, asReceiver));
+  this.missedHandlersBound = true;
+  console.log('[missed][svc] socket handlers bound');
+
+}
 
   
-
   getMedia(facingMode: string) {
     return navigator.mediaDevices.getUserMedia({
-        video: {
-          facingMode: facingMode
-        },
-        audio: true
+      video: { facingMode: facingMode },
+      audio: true
     })
     .then((stream) => {
       this.handleSuccess(stream);
@@ -390,288 +515,265 @@ public async listAllMediaDevices(): Promise<void> {
     })
   }
 
-  async init(myEl: HTMLVideoElement, partnerEl: HTMLVideoElement): Promise<boolean>
-  {
+  async init(myEl: HTMLVideoElement, partnerEl: HTMLVideoElement): Promise<boolean> {
     try {
       // ✅ First validate and store the elements
       if (!myEl || !partnerEl) {
         console.error("❌ Cannot initialize WebRTC: video elements are undefined");
         return false;
       }
-      
       this.myEl = myEl;
       this.partnerEl = partnerEl;
-      
-      
+
       // ✅ Then request permissions
       const hasPermissions = await this.requestPermissions();
       if (!hasPermissions) return false;
-      
+
       // ✅ Finally get the media stream
       this.myStream = await this.getUserMedia();
       if (!this.myStream) return false;
-      
+
       this.myEl.srcObject = this.myStream;
-    
-      console.log("✅ Media stream initialized with device:", 
+      console.log("✅ Media stream initialized with device:",
         this.myStream.getVideoTracks()[0]?.label || 'No video',
-        this.myStream.getAudioTracks()[0]?.label || 'No audio');
-    
-        
+        this.myStream.getAudioTracks()[0]?.label || 'No audio'
+      );
       return true;
     } catch (error) {
       console.error("WebRTC initialization failed:", error);
       return false;
     }
   }
-  
-  getPeerId(): string {
 
-    /* (a) already cached in RAM? */
-    if (this.myPeerId)                     return this.myPeerId;
-
-    /* (b) PeerJS already knows? */
-    if (WebrtcService.peer?.id)            return WebrtcService.peer.id;
-
-    /* (c) persisted in localStorage? */
+  getPeerId(): string | null {
+    if (this.myPeerId) return this.myPeerId;
+    if (WebrtcService.peer?.id) return WebrtcService.peer.id;
     const fromLS = localStorage.getItem('peerId');
-    if (fromLS) {
-      this.myPeerId = fromLS;
-      return fromLS;
-    }
-
-    /* (d) persisted in NativeStorage? (sync fallback) */
-    if ((window as any).cordova) {
-      /* NativeStorage is async, but we can do a *very* small trick:
-         read it synchronously from the plugin’s internal cache if present */
-      // @ts-ignore
-      const cached = this.nativeStorage?._db?.storage?.peerId;
-      if (cached) {
-        this.myPeerId = cached;
-        return cached;
-      }
-    }
-
-    /* (e) still nothing */
-    return null;
+    return fromLS ?? null;
   }
-
+  
 
   // webrtc.service.ts
+  async handleDeviceChange() {
+    if (!this.myStream) return;
 
-async handleDeviceChange() {
-  if (!this.myStream) return;
+    const videoTrack = this.myStream.getVideoTracks()[0];
+    const audioTrack = this.myStream.getAudioTracks()[0];
 
-  const videoTrack = this.myStream.getVideoTracks()[0];
-  const audioTrack = this.myStream.getAudioTracks()[0];
+    // Check if current devices are still working
+    const devices = await navigator.mediaDevices.enumerateDevices();
+    const currentVideoDevice = videoTrack?.getSettings().deviceId;
+    const currentAudioDevice = audioTrack?.getSettings().deviceId;
 
-  // Check if current devices are still working
-  const devices = await navigator.mediaDevices.enumerateDevices();
-  const currentVideoDevice = videoTrack?.getSettings().deviceId;
-  const currentAudioDevice = audioTrack?.getSettings().deviceId;
-
-  // If current video device is no longer available, switch
-  if (videoTrack && (!currentVideoDevice || 
+    // If current video device is no longer available, switch
+    if (videoTrack && (!currentVideoDevice ||
       !devices.some(d => d.kind === 'videoinput' && d.deviceId === currentVideoDevice))) {
-    console.log('Current video device unavailable, switching...');
-    await this.switchToAvailableDevice('videoinput');
-  }
+      console.log('Current video device unavailable, switching...');
+      await this.switchToAvailableDevice('videoinput');
+    }
 
-  // Same for audio
-  if (audioTrack && (!currentAudioDevice || 
+    // Same for audio
+    if (audioTrack && (!currentAudioDevice ||
       !devices.some(d => d.kind === 'audioinput' && d.deviceId === currentAudioDevice))) {
-    console.log('Current audio device unavailable, switching...');
-    await this.switchToAvailableDevice('audioinput');
-  }
-}
-
-private async switchToAvailableDevice(kind: 'videoinput' | 'audioinput'): Promise<void> {
-  const devices = await navigator.mediaDevices.enumerateDevices();
-  const availableDevices = devices.filter(d => d.kind === kind);
-
-  for (const device of availableDevices) {
-    try {
-      const constraints = { [kind]: { deviceId: { exact: device.deviceId } } };
-      const newStream = await navigator.mediaDevices.getUserMedia(constraints);
-      
-      if (kind === 'videoinput') {
-        const newTrack = newStream.getVideoTracks()[0];
-        const oldTrack = this.myStream.getVideoTracks()[0];
-        
-        if (oldTrack) {
-          this.myStream.removeTrack(oldTrack);
-          oldTrack.stop();
-        }
-        
-        this.myStream.addTrack(newTrack);
-        this.myEl.srcObject = this.myStream;
-        
-        // Replace in peer connection if active
-        if (WebrtcService.call) {
-          const sender = this.getVideoSender();
-          if (sender) await sender.replaceTrack(newTrack);
-        }
-      } else {
-        const newTrack = newStream.getAudioTracks()[0];
-        const oldTrack = this.myStream.getAudioTracks()[0];
-        
-        if (oldTrack) {
-          this.myStream.removeTrack(oldTrack);
-          oldTrack.stop();
-        }
-        
-        this.myStream.addTrack(newTrack);
-        
-        // Replace in peer connection if active
-        if (WebrtcService.call) {
-          const sender = this.getAudioSender();
-          if (sender) await sender.replaceTrack(newTrack);
-        }
-      }
-      
-      return; // Successfully switched
-    } catch (error) {
-      console.log(`Failed to switch to ${kind} device ${device.deviceId}`, error);
+      console.log('Current audio device unavailable, switching...');
+      await this.switchToAvailableDevice('audioinput');
     }
   }
-  
-  console.error(`No available ${kind} devices could be activated`);
-}
 
-  
-// webrtc.service.ts
+  private async switchToAvailableDevice(kind: 'videoinput' | 'audioinput'): Promise<void> {
+    const devices = await navigator.mediaDevices.enumerateDevices();
+    const availableDevices = devices.filter(d => d.kind === kind);
 
-// Add these methods to your WebrtcService class:
+    for (const device of availableDevices) {
+      try {
+        const constraints = { [kind]: { deviceId: { exact: device.deviceId } } };
+        const newStream = await navigator.mediaDevices.getUserMedia(constraints);
 
-/**
- * Refresh the list of available media devices
- */
-async refreshDevices(): Promise<void> {
-  try {
-    await navigator.mediaDevices.enumerateDevices();
-    // This triggers the devicechange event which will update our device list
-  } catch (error) {
-    console.error('Error refreshing devices:', error);
+        if (kind === 'videoinput') {
+          const newTrack = newStream.getVideoTracks()[0];
+          const oldTrack = this.myStream.getVideoTracks()[0];
+          if (oldTrack) {
+            this.myStream.removeTrack(oldTrack);
+            oldTrack.stop();
+          }
+          this.myStream.addTrack(newTrack);
+          this.myEl.srcObject = this.myStream;
+
+          // Replace in peer connection if active
+          if (WebrtcService.call) {
+            const sender = this.getVideoSender();
+            if (sender) await sender.replaceTrack(newTrack);
+          }
+        } else {
+          const newTrack = newStream.getAudioTracks()[0];
+          const oldTrack = this.myStream.getAudioTracks()[0];
+          if (oldTrack) {
+            this.myStream.removeTrack(oldTrack);
+            oldTrack.stop();
+          }
+          this.myStream.addTrack(newTrack);
+
+          // Replace in peer connection if active
+          if (WebrtcService.call) {
+            const sender = this.getAudioSender();
+            if (sender) await sender.replaceTrack(newTrack);
+          }
+        }
+        return; // Successfully switched
+      } catch (error) {
+        console.log(`Failed to switch to ${kind} device ${device.deviceId}`, error);
+      }
+    }
+
+    console.error(`No available ${kind} devices could be activated`);
   }
-}
 
-/**
- * Get the video sender from the current peer connection
- */
-private getVideoSender(): RTCRtpSender | null {
-  if (!WebrtcService.call || !WebrtcService.call.peerConnection) {
-    return null;
+  // webrtc.service.ts
+  // Add these methods to your WebrtcService class:
+  /** Refresh the list of available media devices */
+  async refreshDevices(): Promise<void> {
+    try {
+      await navigator.mediaDevices.enumerateDevices();
+      // This triggers the devicechange event which will update our device list
+    } catch (error) {
+      console.error('Error refreshing devices:', error);
+    }
   }
-  
-  const senders = WebrtcService.call.peerConnection.getSenders();
-  return senders.find(sender => sender.track?.kind === 'video') || null;
-}
 
-/**
- * Get the audio sender from the current peer connection
- */
-private getAudioSender(): RTCRtpSender | null {
-  if (!WebrtcService.call || !WebrtcService.call.peerConnection) {
-    return null;
+  /** Get the video sender from the current peer connection */
+  private getVideoSender(): RTCRtpSender | null {
+    if (!WebrtcService.call || !WebrtcService.call.peerConnection) {
+      return null;
+    }
+    const senders = WebrtcService.call.peerConnection.getSenders();
+    return senders.find(sender => sender.track?.kind === 'video') || null;
   }
-  
-  const senders = WebrtcService.call.peerConnection.getSenders();
-  return senders.find(sender => sender.track?.kind === 'audio') || null;
-}
+
+  /** Get the audio sender from the current peer connection */
+  private getAudioSender(): RTCRtpSender | null {
+    if (!WebrtcService.call || !WebrtcService.call.peerConnection) {
+      return null;
+    }
+    const senders = WebrtcService.call.peerConnection.getSenders();
+    return senders.find(sender => sender.track?.kind === 'audio') || null;
+  }
   private startPeerIdHeartbeat(userId: string, peerId: string) {
     if (this.peerHeartbeatInterval) {
       clearInterval(this.peerHeartbeatInterval);
     }
-  
     this.peerHeartbeatInterval = setInterval(() => {
-      this.userService.heartbeatPeer(userId)     // new lightweight call
+      this.userService.heartbeatPeer(userId) // new lightweight call
         .catch(err => console.error('❌ heartbeat failed:', err));
-    }, 60_000);                                   // every 60 s
+    }, 60_000); // every 60 s
   }
-  
 
-// webrtc.service.ts  ── just replace the whole method
-// ✅ keep THIS one
-public waitForPeerOpen(): Promise<void> {
-  return new Promise((resolve, reject) => {
-    /* 🚦 1 — make sure the Peer instance exists */
-    if (!WebrtcService.peer) {
-      return reject(new Error('PeerJS instance not created yet'));
-    }
-    /* 🚦 2 — already open … */
-    if (WebrtcService.peer.open) return resolve();
-    /* 🚦 3 — wait max 10 s … */
-    const timeout = setTimeout(
-      () => reject(new Error('⏰ peer.open timeout (10 s)')), 10_000
-    );
-    WebrtcService.peer.once('open', () => {
-      clearTimeout(timeout);
-      resolve();
-    });
-  });
-}
-
-
-  private creatingPeer = false;         // ⇦  guard
-
-  async createPeer(authUserId: string): Promise<void> {
-    if (this.creatingPeer) return;      
-    if (WebrtcService.peer && WebrtcService.peer.open) return;
-    this.creatingPeer = true;
-  
+  // webrtc.service.ts ── just replace the whole method
+  // ✅ keep THIS one
+  public waitForPeerOpen(): Promise<void> {
     return new Promise((resolve, reject) => {
-      const myPeerId  = authUserId;
-      this.myPeerId   = myPeerId;
-      this.userId     = authUserId;
-  
-      WebrtcService.peer = new Peer(myPeerId, {
-        host   : 'peerjs-whei.onrender.com',
-        port   : 443,
+      /* 🚦 1 — make sure the Peer instance exists */
+      if (!WebrtcService.peer) {
+        return reject(new Error('PeerJS instance not created yet'));
+      }
+
+      /* 🚦 2 — already open … */
+      if (WebrtcService.peer.open) return resolve();
+
+      /* 🚦 3 — wait max 10 s … */
+      const timeout = setTimeout(
+        () => reject(new Error('⏰ peer.open timeout (20 s)')),
+        20_000
+      );
+
+      WebrtcService.peer.once('open', () => {
+        clearTimeout(timeout);
+        resolve();
+      });
+    });
+  }
+
+  private creatingPeer = false;
+
+  private spawnPeer(candidateId: string, authUserId: string): Promise<void> {
+    return new Promise((resolve, reject) => {
+      try { WebrtcService.peer?.destroy(); } catch {}
+      WebrtcService.peer = new Peer(candidateId, {
+        host : 'peerjs-whei.onrender.com',
+        port : 443,
         secure : true,
-        path   : '/peerjs',
-        config : { 
+        path : '/peerjs',
+        debug: 2,
+        pingInterval: 25000,
+        config : {
           iceServers: [
             { urls: 'stun:stun.l.google.com:19302' },
             { urls: 'stun:stun1.l.google.com:19302' }
-          ] 
+          ]
         }
       });
   
-      WebrtcService.peer.once('open', async () => {
-        console.log('✅ peer open');
+// webrtc.service.ts → spawnPeer(): after setting userId
+WebrtcService.peer.once('open', async () => {
+  this.myPeerId = candidateId;
+  this.userId = authUserId;
+  localStorage.setItem('peerId', candidateId);
+  try { await this.userService.sendPeerIdToBackend(authUserId, candidateId); } catch {}
+  this.startPeerIdHeartbeat(authUserId, candidateId);
+
+    // ✅ ensure missed-call handlers are attached
+  await this.bindMissedCallSocketHandlers();
+  this.wait();
+
+  resolve();
+});
+
   
-        localStorage.setItem('peerId', myPeerId);
-        try { await this.nativeStorage.setItem('peerId', myPeerId); } 
-        catch {}
-  
-        await this.userService.sendPeerIdToBackend(authUserId, myPeerId);
-        this.startPeerIdHeartbeat(authUserId, myPeerId);
-        this.creatingPeer = false;
-        resolve();
-      });
-  
-      WebrtcService.peer.on('error', err => {
-        if (err.type === 'unavailable-id') {
-          console.warn('♻️ id in use – waiting 3 s then reconnect');
-          setTimeout(() => { try { WebrtcService.peer?.reconnect(); } catch {} }, 3000);
-          return;
-        }
-        console.error('peer error:', err);
+      WebrtcService.peer.once('error', (err: any) => {
+        reject(err);
       });
     });
   }
   
+  private makeCandidateId(base: string) {
+    // short, URL-safe suffix
+    return `${base}-${Math.random().toString(36).slice(2,6)}`;
+  }
   
+  async createPeer(authUserId: string): Promise<void> {
+    if (this.creatingPeer) return;
+    if (WebrtcService.peer && WebrtcService.peer.open) return;
+    this.creatingPeer = true;
   
-
-
-
+    try {
+      // Try a fresh suffixed ID first (avoids collisions / zombie sessions)
+      let candidate = this.makeCandidateId(authUserId);
+      try {
+        await this.spawnPeer(candidate, authUserId);
+        return;
+      } catch (e: any) {
+        if (e?.type !== 'unavailable-id') throw e;
+      }
   
+      // Try another suffix
+      candidate = this.makeCandidateId(authUserId);
+      try {
+        await this.spawnPeer(candidate, authUserId);
+        return;
+      } catch (e: any) {
+        if (e?.type !== 'unavailable-id') throw e;
+      }
+  
+      // Fallback: plain base id as last resort
+      await this.spawnPeer(authUserId, authUserId);
+    } finally {
+      this.creatingPeer = false;
+    }
+  }
+
   async getPartnerUser(partnerId: string): Promise<User | null> {
     try {
       const user = await this.userService.getUserProfile(partnerId).toPromise();
-      console.log("userService.getUserProfile(userService.getUserProfile(userService.getUserProfile(userService.getUserProfile(", user);
-
+      console.log("userService.getUserProfile(", user);
       return user || null; // Return the user object or null if undefined
     } catch (error) {
       console.error("❌ Error fetching partner user:", error);
@@ -679,373 +781,269 @@ public waitForPeerOpen(): Promise<void> {
     }
   }
 
-// Add to WebrtcService
-private callState = new BehaviorSubject<{connected: boolean, type: 'caller' | 'receiver'}>(null);
-public callState$ = this.callState.asObservable();
+  // Add to WebrtcService
+  private callState = new BehaviorSubject<{connected: boolean, type: 'caller' | 'receiver'}>(null);
+  public callState$ = this.callState.asObservable();
 
-async callPartner(partnerPeerId: string) {
-  console.log(`📞 Attempting to call partner with Peer ID: ${partnerPeerId}`);
-
-  if (!this.myEl || !this.partnerEl) {
-    console.error("❌ Cannot call: video elements not initialized");
-    return;
+  async getUserMedia(): Promise<MediaStream | null> {
+    // Reuse a live stream if we already have one
+    if (this.myStream && this.myStream.getTracks().some(t => t.readyState === 'live')) {
+      return this.myStream;
+    }
+  
+    try {
+      // Acquire specific devices (with your locking)
+      const videoDeviceId = await this.deviceManager.getAvailableDevice('videoinput', this.tabId);
+      const audioDeviceId = await this.deviceManager.getAvailableDevice('audioinput', this.tabId);
+      if (!videoDeviceId || !audioDeviceId) {
+        throw new Error('All devices are currently in use');
+      }
+  
+      // Remember intended devices
+      this.activeDevices = { video: videoDeviceId, audio: audioDeviceId };
+  
+      // Create the stream
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: {
+          width: { ideal: 640, max: 640 },
+          height: { ideal: 480, max: 480 },
+          frameRate: { ideal: 15, max: 30 },
+          deviceId: { exact: videoDeviceId }
+        },
+        audio: { deviceId: { exact: audioDeviceId } }
+      });
+  
+      // ✅ Keep references so close() can stop tracks reliably
+      this.myStream = stream;
+      this.activeStreams.set(this.tabId, stream);
+  
+      // Update activeDevices with what the browser actually picked
+      stream.getTracks().forEach(track => {
+        const id = track.getSettings().deviceId;
+        if (track.kind === 'video' && id) this.activeDevices.video = id;
+        if (track.kind === 'audio' && id) this.activeDevices.audio = id;
+      });
+  
+      return stream;
+  
+    } catch (error) {
+      console.error('Error acquiring media:', error);
+  
+      // Fallback: relaxed constraints
+      try {
+        console.log('Attempting fallback with relaxed constraints');
+        const fallbackStream = await navigator.mediaDevices.getUserMedia({
+          video: true,
+          audio: true
+        });
+  
+        // ✅ Also keep references for fallback
+        this.myStream = fallbackStream;
+        this.activeStreams.set(this.tabId, fallbackStream);
+  
+        // Best-effort: record actual devices used
+        this.activeDevices = {};
+        fallbackStream.getTracks().forEach(track => {
+          const id = track.getSettings().deviceId;
+          if (track.kind === 'video' && id) this.activeDevices.video = id;
+          if (track.kind === 'audio' && id) this.activeDevices.audio = id;
+        });
+  
+        return fallbackStream;
+  
+      } catch (fallbackError) {
+        console.error('Fallback media acquisition failed:', fallbackError);
+        this.toastService.presentStdToastr(
+          'All cameras/microphones are in use. Please close other applications using these devices and try again.'
+        );
+        return null;
+      }
+    }
   }
   
-  if (!this.myStream) {
-    console.error("❌ Cannot call: no local media stream");
-    return;
-  }
+  private async attachRemoteStream(
+    el: HTMLVideoElement,
+    stream: MediaStream,
+    afterConnected: () => void,
+  ) {
+    el.srcObject = stream;
 
-  if (!partnerPeerId) {
-    console.error("❌ Partner's Peer ID is missing. Cannot call.");
-    this.toastService.presentStdToastr("User is offline or unavailable.");
-    return;
-  }
-
-  WebrtcService.call = WebrtcService.peer.call(partnerPeerId, this.myStream);
-  this.callState.next({connected: false, type: 'caller'}); // Set initial state
-
-  if (!WebrtcService.call) {
-    console.error("❌ WebRTC Call object is undefined.");
-    return;
-  }
-
-/* ────────── remote stream + close handling ────────── */
-/*  ────────── remote stream + close handling ──────────  */
-WebrtcService.call.on('stream', (remote) => {
-
-  const attach = () => {
-    if (!this.partnerEl) {
-      return setTimeout(attach, 100);          // element not ready yet
-    }
-
-    // 1. assign stream
-    this.partnerEl.srcObject = remote;
-
-    // 2. once metadata is ready → play()
-    const tryPlay = () => {
-      const playPromise = this.partnerEl.play();
-      if (playPromise !== undefined) {
-        playPromise.catch(() => {
-          /* some browsers need another tick */
-          setTimeout(tryPlay, 100);
-        });
+    /* Kick off playback */
+    const resume = () => {
+      const p = el.play();
+      if (p !== undefined) {
+        p.catch(() => setTimeout(resume, 100)); // retry if autoplay blocked
       }
     };
 
-    this.partnerEl.onloadedmetadata = tryPlay;
-    tryPlay();                                 // fallback if event already fired
-
-    // 3. update ui state
-    this.callState.next({ connected: true, type: 'caller' });
-  };
-
-  attach();
-});
-
-/* 🔑 unified close / error → reset + broadcast */
-const closed = () => {
-  this.callState.next(null);
-  window.dispatchEvent(new CustomEvent('peer-call-closed'));
-};
-WebrtcService.call.on('close',  closed);
-WebrtcService.call.on('error', closed);
-
-
-  console.log("✅ Call initiated successfully.");
-}
-
-  
-async getUserMedia(): Promise<MediaStream | null> {
-  this.releaseCurrentStream();
-
-  try {
-    // Get available devices with locking
-    const videoDeviceId = await this.deviceManager.getAvailableDevice('videoinput', this.tabId);
-    const audioDeviceId = await this.deviceManager.getAvailableDevice('audioinput', this.tabId);
-
-    if (!videoDeviceId || !audioDeviceId) {
-      throw new Error('All devices are currently in use');
+    if (el.readyState >= 1) {
+      resume(); // metadata is already available
+    } else {
+      el.onloadedmetadata = resume; // wait until it is
+    }
+    afterConnected();
+  }
+  private releaseCurrentStream() {
+    if (this.activeStreams.has(this.tabId)) {
+      const stream = this.activeStreams.get(this.tabId);
+      if (stream) {
+        stream.getTracks().forEach(track => {
+          track.stop();
+          track.enabled = false;
+        });
+      }
+      this.activeStreams.delete(this.tabId);
     }
 
-    // Store the acquired device IDs
-    this.activeDevices = {
-      video: videoDeviceId,
-      audio: audioDeviceId
-    };
+    // Release any device locks
+    if (this.activeDevices.video) {
+      this.deviceManager.releaseDevice(this.activeDevices.video, this.tabId);
+    }
+    if (this.activeDevices.audio) {
+      this.deviceManager.releaseDevice(this.activeDevices.audio, this.tabId);
+    }
+    this.activeDevices = {};
+  }
 
-    // Create stream with acquired devices
-    const stream = await navigator.mediaDevices.getUserMedia({
-      video: { deviceId: { exact: videoDeviceId } },
-      audio: { deviceId: { exact: audioDeviceId } }
-    });
+  // Store missed call when recipient is offline
+  async storeMissedCall(userId: string) {
+    const missedCalls = JSON.parse(localStorage.getItem("missedCalls") || "[]");
 
-    this.activeStreams.set(this.tabId, stream);
-    return stream;
-  } catch (error) {
-    console.error('Error acquiring media:', error);
-    
-    // Fallback strategy
+    // Avoid duplicates:
+    if (missedCalls.some(call => call.userId === userId)) {
+      console.log(`❗ Missed call for ${userId} already exists`);
+      return;
+    }
+
+    // Get partner name (optional but better UX)
+    let userName = userId;
     try {
-      console.log('Attempting fallback with relaxed constraints');
-      const fallbackStream = await navigator.mediaDevices.getUserMedia({
-        video: true, // Most relaxed constraints
-        audio: true
-      });
-      this.activeStreams.set(this.tabId, fallbackStream);
-      return fallbackStream;
-    } catch (fallbackError) {
-      console.error('Fallback media acquisition failed:', fallbackError);
-      this.toastService.presentStdToastr(
-        'All cameras/microphones are in use. ' +
-        'Please close other applications using these devices and try again.'
-      );
-      return null;
+      const partner = await this.userService.getUserProfile(userId).toPromise();
+      userName = `${partner.firstName} ${partner.lastName}`;
+    } catch (err) {
+      console.warn("⚠ Could not fetch partner name");
     }
-  }
-}
 
-private async attachRemoteStream(
-  el: HTMLVideoElement,
-  stream: MediaStream,
-  afterConnected: () => void,
-) {
-  el.srcObject = stream;
-
-  /* Kick off playback */
-  const resume = () => {
-    const p = el.play();
-    if (p !== undefined) {
-      p.catch(() => setTimeout(resume, 100));   // retry if autoplay blocked
-    }
-  };
-
-  if (el.readyState >= 1) {
-    resume();                     // metadata is already available
-  } else {
-    el.onloadedmetadata = resume; // wait until it is
+    missedCalls.push({
+      userId,
+      userName,
+      timestamp: new Date().toISOString(),
+    });
+    localStorage.setItem("missedCalls", JSON.stringify(missedCalls));
+    this.missedCallsSubject.next(missedCalls); // ✅ not missedCalls$
+    console.log(`🔔 Missed call stored for ${userName}`);
   }
 
-  afterConnected();
-}
-
-
-private releaseCurrentStream() {
-  if (this.activeStreams.has(this.tabId)) {
-    const stream = this.activeStreams.get(this.tabId);
-    if (stream) {
-      stream.getTracks().forEach(track => {
-        track.stop();
-        track.enabled = false;
-      });
-    }
-    this.activeStreams.delete(this.tabId);
-  }
-  
-  // Release any device locks
-  if (this.activeDevices.video) {
-    this.deviceManager.releaseDevice(this.activeDevices.video, this.tabId);
-  }
-  if (this.activeDevices.audio) {
-    this.deviceManager.releaseDevice(this.activeDevices.audio, this.tabId);
-  }
-  
-  this.activeDevices = {};
-}
-
-
-
-// Store missed call when recipient is offline
-async storeMissedCall(userId: string) {
-  const missedCalls = JSON.parse(localStorage.getItem("missedCalls") || "[]");
-
-  // Avoid duplicates:
-  if (missedCalls.some(call => call.userId === userId)) {
-    console.log(`❗ Missed call for ${userId} already exists`);
-    return;
-  }
-
-  // Get partner name (optional but better UX)
-  let userName = userId;
-  try {
-    const partner = await this.userService.getUserProfile(userId).toPromise();
-    userName = `${partner.firstName} ${partner.lastName}`;
-  } catch (err) {
-    console.warn("⚠ Could not fetch partner name");
-  }
-
-  missedCalls.push({
-    userId,
-    userName,
-    timestamp: new Date().toISOString(),
-  });
-
-  localStorage.setItem("missedCalls", JSON.stringify(missedCalls));
-  this.missedCalls$.next(missedCalls);
-  console.log(`🔔 Missed call stored for ${userName}`);
-}
-
-
-
-
-
-
-notifyMissedCalls() {
-  const missedCalls = JSON.parse(localStorage.getItem('missedCalls')) || [];
-  if (missedCalls.length > 0) {
+  notifyMissedCalls() {
+    const missedCalls = JSON.parse(localStorage.getItem('missedCalls')) || [];
+    if (missedCalls.length > 0) {
       alert(`📞 You have ${missedCalls.length} missed call(s)!`);
       localStorage.removeItem('missedCalls'); // Clear after notifying
-  }
-}
-
-
-async requestPermissions() {
-  try {
-    await this.permissionService.getPermission(this.androidPermission.PERMISSION.CAMERA);
-    await this.permissionService.getPermission(this.androidPermission.PERMISSION.RECORD_AUDIO);
-    await this.permissionService.getPermission(this.androidPermission.PERMISSION.MODIFY_AUDIO_SETTINGS);
-  } catch (err) {
-    console.error("❌ Permission error:", err);
-    return false;
-  }
-  return true;
-}
-
-
-
-async wait() {
-  console.log("📡 Waiting for incoming calls...");
-
-  WebrtcService.peer.on("call", async (call) => {
-    console.log("📞 Incoming call detected from:", call.peer);
-
-    try {
-      // ✅ Acquire specific devices for this tab
-      if (!this.myStream) {
-        console.log("🎥 Media stream not ready. Trying to acquire specific devices...");
-
-        // 💡 Replace with your service reference if needed
-        this.myStream = await this.getOptimalMediaStream();
-
-        if (!this.myStream) {
-          console.error("❌ Cannot answer: No media stream available.");
-          return;
-        }
-
-        if (this.myEl) {
-          this.myEl.srcObject = this.myStream;
-        }
-      }
-
-      WebrtcService.call = call;
-      const partnerId = call.peer.split('-')[0]; // Extract actual user ID
-      localStorage.setItem('partnerId', partnerId);
-
-      // ✅ Navigate to video page if not already there
-      if (!this.router.url.includes('/messages/video')) {
-        console.log("🔁 Navigating to video call screen...");
-
-        const navigationSuccess = await this.router.navigate(
-          ['/messages/video', partnerId],
-          {
-            queryParams: { answer: true },
-            state: { incomingCall: true }
-          }
-        );
-
-        if (!navigationSuccess) {
-          console.error("❌ Navigation to video screen failed");
-          call.close();
-          return;
-        }
-      }
-
-      // ✅ Answer the call after ensuring media stream is ready
-      WebrtcService.call = call;
-      localStorage.setItem('partnerId', partnerId);
-      
-      // ✅ Navigate to video page
-      if (!this.router.url.includes('/messages/video')) {
-        await this.router.navigate(['/messages/video', partnerId], {
-          queryParams: { answer: true },
-          state: { incomingCall: true }
-        });
-      }
-      // Setup stream handlers
-
-      call.on("close", () => {
-        console.log("📴 Call closed by remote peer");
-        if (this.partnerEl) this.partnerEl.srcObject = null;
-      });
-
-      call.on("error", (err) => {
-        console.error("❌ Call error:", err);
-        if (this.partnerEl) this.partnerEl.srcObject = null;
-      });
-
-    } catch (error) {
-      console.error("❌ Error handling incoming call:", error);
-      if (call) call.close();
     }
-  });
-}
-
-
-
-
-// ✅ Function to check if the peer is online
-async checkPeerOnline(peerId: string): Promise<boolean> {
-  return new Promise((resolve) => {
-    const conn = WebrtcService.peer.connect(peerId);
-    conn.on("open", () => {
-      console.log(`✅ Peer ${peerId} is online`);
-      resolve(true);
-      conn.close();
-    });
-    conn.on("error", () => {
-      console.warn(`⚠️ Peer ${peerId} is offline`);
-      resolve(false);
-    });
-  });
-}
-
-
-
-
-
-handleSuccess(stream: MediaStream) {
-  this.myStream = stream;
-
-  if (!this.myEl) {
-    console.warn("⚠️ Video element not ready yet. Stream will be assigned later.");
-    return;
   }
 
-  try {
-    this.myEl.srcObject = stream;
-    this.myEl.muted = true; // Important for local playback
-    console.log("✅ Stream successfully assigned to video element");
-  } catch (error) {
-    console.error("❌ Error assigning stream to video element:", error);
+  async requestPermissions() {
+    try {
+      await this.permissionService.getPermission(this.androidPermission.PERMISSION.CAMERA);
+      await this.permissionService.getPermission(this.androidPermission.PERMISSION.RECORD_AUDIO);
+      await this.permissionService.getPermission(this.androidPermission.PERMISSION.MODIFY_AUDIO_SETTINGS);
+    } catch (err) {
+      console.error("❌ Permission error:", err);
+      return false;
+    }
+    return true;
   }
-}
 
+  async wait() {
+    console.log("📡 Waiting for incoming calls...");
+    WebrtcService.peer.off("call");
+    WebrtcService.peer.on("call", async (call) => {
+      console.log('[peer:rx] incoming from', call.peer);
+  
+      try {
+        // ✅ DO NOT open camera here. Just remember the call.
+        WebrtcService.call = call;
+        const partnerId = call.peer.split('-')[0];
+        this.partnerId = partnerId;
+        localStorage.setItem('partnerId', partnerId);
+  
+        // Navigate to the screen that shows Accept/Decline UI
+        if (!this.router.url.includes('/messages/video')) {
+          await this.router.navigate(
+            ['/messages/video', partnerId],
+            { queryParams: { answer: true }, state: { incomingCall: true } }
+          );
+        }
+  
+        // Basic safety handlers
+        call.on("close", () => {
+          console.log("📴 Call closed by remote peer");
+          if (this.partnerEl) this.partnerEl.srcObject = null;
+        });
+        call.on("error", (err) => {
+          console.error("❌ Call error:", err);
+          if (this.partnerEl) this.partnerEl.srcObject = null;
+        });
+  
+      } catch (error) {
+        console.error("❌ Error handling incoming call:", error);
+        try { call.close(); } catch {}
+      }
+    });
+  }
+  
 
+  // ✅ Function to check if the peer is online
+  async checkPeerOnline(peerId: string): Promise<boolean> {
+    return new Promise((resolve) => {
+      let settled = false;
+      const finish = (ok: boolean) => {
+        if (settled) return;
+        settled = true;
+        try { conn?.close(); } catch {}
+        resolve(ok);
+      };
+  
+      const conn = WebrtcService.peer.connect(peerId, { reliable: false });
+      const t = setTimeout(() => finish(false), 2000); // hard 2s cap
+  
+      conn.on('open',  () => { clearTimeout(t); finish(true);  });
+      conn.on('error', () => { clearTimeout(t); finish(false); });
+      conn.on('close', () => { clearTimeout(t); finish(false); });
+    });
+  }
+  
+
+  handleSuccess(stream: MediaStream) {
+    this.myStream = stream;
+    if (!this.myEl) {
+      console.warn("⚠️ Video element not ready yet. Stream will be assigned later.");
+      return;
+    }
+    try {
+      this.myEl.srcObject = stream;
+      this.myEl.muted = true; // Important for local playback
+      console.log("✅ Stream successfully assigned to video element");
+    } catch (error) {
+      console.error("❌ Error assigning stream to video element:", error);
+    }
+  }
 
   handleError(error: any) {
     if (error.name === 'NotReadableError') {
-    this.toastService.presentStdToastr(
-      'Camera/mic is being used by another app. ' + 
-      'Please close other applications using your devices.'
-    );
-  }
-
+      this.toastService.presentStdToastr(
+        'Camera/mic is being used by another app. ' +
+        'Please close other applications using your devices.'
+      );
+    }
     if (error.name === 'ConstraintNotSatisfiedError') {
       this.errorMsg(`The resolution px is not supported by your device.`);
     } else if (error.name === 'PermissionDeniedError') {
-      this.errorMsg('Permissions have not been granted to use your camera and ' +
+      this.errorMsg(
+        'Permissions have not been granted to use your camera and ' +
         'microphone, you need to allow the page access to your devices in ' +
-        'order for the demo to work.');
+        'order for the demo to work.'
+      );
     }
     this.errorMsg(`getUserMedia error: ${error.name}`, error);
   }
@@ -1055,142 +1053,141 @@ handleSuccess(stream: MediaStream) {
     if (errorElement) {
       errorElement.innerHTML += `<p>${msg}</p>`;
     }
-    
     if (typeof error !== 'undefined') {
       console.error(error);
     }
   }
-
-  answer(call?: MediaConnection) {
-    if (!this.myStream) {
-      console.error("❌ Cannot answer: No media stream available.");
-      return;
+  /* ────────────────────────────────────────────────────────────────────────────
+   * webrtc.service.ts ▸ replace the whole answer() with this function
+   *────────────────────────────────────────────────────────────────────────────*/
+  async answer(call?: MediaConnection) {
+    if (!this.myStream || !this.myStream.getVideoTracks().length){
+      console.warn('[answer] no video – grabbing camera');
+      this.myStream = await this.getOptimalMediaStream();
+      if (!this.myStream) return console.error('[answer] still no cam');
     }
-  
+
     const activeCall = call || WebrtcService.call;
-    if (!activeCall) {
-      console.error("❌ No incoming call to answer.");
-      return;
-    }
-  
-    console.log("📞 Answering call from:", activeCall.peer);
+    if (!activeCall) return console.error('[answer] no call object');
+
+    console.log('📞 [answer] answering', activeCall.peer);
     activeCall.answer(this.myStream);
-    this.callState.next({connected: false, type: 'receiver'});
-  
-/* ────────── remote stream + close handling ────────── */
-// webrtc.service.ts  –– inside answer()
-activeCall.on('stream', (remote: MediaStream) => {
-  console.log('📡 remote stream', remote);
+    this.callState.next({connected:false, type:'receiver'});
 
-  /* attach when the first video frame is really flowing */
-  const vTrack = remote.getVideoTracks()[0];
-  const attach = () => {
-    if (!this.partnerEl) {              // video tag not ready yet
-      return setTimeout(attach, 100);
-    }
+    activeCall.peerConnection.addEventListener(
+      'iceconnectionstatechange',
+      () => console.log('🌐 [ICE-RX] →', activeCall.peerConnection.iceConnectionState)
+    );
 
-    /* 1 — assign */
-    this.partnerEl.srcObject = remote;
+    /* attach once */
+    let remoteAttached = false;
+    const attach = (remote: MediaStream, src: 'stream' | 'track') => {
+      this.latestRemoteStream = remote; // ① remember it
+      if (!this.partnerEl) return; // ② maybe page not ready yet
 
-    /* 2 — autoplay helper */
-    const tryPlay = () => {
-      const p = this.partnerEl.play();
-      if (p !== undefined) {            // Chrome returns a promise
-        p.catch(() => setTimeout(tryPlay, 100));
-      }
+      this.partnerEl.srcObject = remote;
+      if (remoteAttached) return;
+      remoteAttached = true;
+
+      console.log(`🎬 [RX ${src}] tracks=`, remote.getTracks().map(t=>`${t.kind}:${t.readyState}`).join(', '));
+
+      const wait = () => this.partnerEl ? start() : setTimeout(wait, 50);
+      const start = () => {
+        console.log('🖇 [receiver] set srcObject');
+        this.partnerEl!.srcObject = remote;
+        this.partnerEl!.muted = true;
+
+        const play = () => this.partnerEl!.play()
+          .then(()=>console.log('▶️ [receiver] video playing (muted)'))
+          .catch(e=>{
+            console.warn('⏸ retry play()',e);
+            setTimeout(play,120);
+          });
+
+        this.partnerEl!.onloadedmetadata = play;
+        play();
+
+        const unmute = () => {
+          this.partnerEl!.muted = false;
+          this.partnerEl!.play().catch(()=>{});
+          console.log('🔊 [receiver] un-muted by user');
+          document.removeEventListener('click', unmute);
+        };
+        document.addEventListener('click', unmute, {once:true});
+
+        this.callState.next({connected:true, type:'receiver'});
+      };
+      wait();
     };
-    this.partnerEl.onloadedmetadata = tryPlay;
-    tryPlay();
 
-    /* 3 — mark call as connected */
-    this.callState.next({ connected: true, type: 'receiver' });
-  };
-
-  if (vTrack) {
-    /* Firefox & Chrome fire “unmute” when real frames start */
-    vTrack.onunmute = () => {
-      vTrack.onunmute = null;           // run only once
-      attach();
-    };
+    activeCall.on('track', (e:any)=>attach(e.streams[0],'track'));
+    activeCall.on('stream', s =>attach(s, 'stream'));
+    activeCall.on('close', ()=>{
+      console.log('🔚 [answer] closed');
+      this.callState.next(null);
+    });
+    activeCall.on('error', e=>{
+      console.error(e);
+    });
   }
 
-  /* Safari fallback – its “unmute” is unreliable */
-  setTimeout(attach, 1500);
-});
-
-
-
-
-/* 🔑 unified close / error → reset + broadcast */
-const closed = () => {
-  this.callState.next(null);
-  window.dispatchEvent(new CustomEvent('peer-call-closed'));
-};
-activeCall.on('close',  closed);
-activeCall.on('error', closed);
-
-
-    WebrtcService.call = activeCall;
-  }
-
-
-  public close(): void {
+  public async close(opts?: { silent?: boolean }): Promise<void> {
     if (this.isClosed) return;
     this.isClosed = true;
-  
+    const silent = !!opts?.silent;
+
     console.log("🛑 Closing WebRTC connections and releasing devices...");
-    
+
     // Release device locks
     if (this.activeDevices.video) {
       this.deviceManager.releaseDevice(this.activeDevices.video, this.tabId);
-      if (this.deviceLockChannel) {
-        this.deviceLockChannel.postMessage({
-          type: 'release',
-          kind: 'video',
-          deviceId: this.activeDevices.video
-        });
-      }
+      this.deviceLockChannel?.postMessage({ type: 'release', kind: 'video', deviceId: this.activeDevices.video });
     }
-    
     if (this.activeDevices.audio) {
       this.deviceManager.releaseDevice(this.activeDevices.audio, this.tabId);
-      if (this.deviceLockChannel) {
-        this.deviceLockChannel.postMessage({
-          type: 'release',
-          kind: 'audio', 
-          deviceId: this.activeDevices.audio
-        });
-      }
+      this.deviceLockChannel?.postMessage({ type: 'release', kind: 'audio', deviceId: this.activeDevices.audio });
     }
-  
-    // Clean up peer connection
+
+    if (this.peerHeartbeatInterval) {
+      clearInterval(this.peerHeartbeatInterval);
+      this.peerHeartbeatInterval = null;
+    }
+    
+    this.activeDevices = {};
+
+    // Peer connection
     if (WebrtcService.call) {
-      try {
-        WebrtcService.call.close();
-      } catch (err) {
-        console.error("Error closing call:", err);
-      }
+      try { WebrtcService.call.close(); } catch {}
       WebrtcService.call = null;
     }
-  
-    // Clean up media streams
+
+    // Media streams
     if (this.myStream) {
-      this.myStream.getTracks().forEach(track => track.stop());
+      this.myStream.getTracks().forEach(t => {
+        try { t.stop(); } catch {}
+        t.enabled = false;
+      });
       this.myStream = null;
     }
-  
-    // Clean up video elements
-    if (this.myEl) {
-      this.myEl.srcObject = null;
+
+    // Video elements
+    if (this.myEl) this.myEl.srcObject = null;
+    if (this.partnerEl) this.partnerEl.srcObject = null;
+
+    // ✅ Only emit ENDED when *we* initiated the hangup
+    if (!silent && this.userId && this.partnerId) {
+      const sock = await SocketService.getSocket();
+      if (sock?.connected) {
+        sock.emit(VideoEvents.ENDED, { from: this.userId, to: this.partnerId });
+        sock.emit('leave-call', { room: this.partnerId });
+        // If your enum name differs from backend literal, keep both:
+        if (VideoEvents.ENDED !== 'video-call-ended') {
+          sock.emit('video-call-ended', { from: this.userId, to: this.partnerId });
+        }
+      }
     }
-    if (this.partnerEl) {
-      this.partnerEl.srcObject = null;
-    }
-  
-    // Reset state
     this.callState.next(null);
   }
-  
 
   toggleCamera() {
     this.myStream.getVideoTracks()[0].enabled = !this.myStream.getVideoTracks()[0].enabled;
@@ -1206,4 +1203,30 @@ activeCall.on('error', closed);
     this.facingMode = this.facingMode == 'user' ? 'environment' : 'user';
     this.getMedia(this.facingMode);
   }
+}
+/** Move every VP8 payloadId to the front of the m=video line. */
+/** preferVp8 v2 – no duplicate payload-ids */
+function preferVp8(sdp: string): string {
+  const lines = sdp.split('\r\n');
+  let mLineIndex = -1;
+  const vp8Ids: string[] = [];
+
+  lines.forEach((l, i) => {
+    if (l.startsWith('m=video')) mLineIndex = i;
+    const m = l.match(/^a=rtpmap:(\d+)\s+VP8\/90000/i);
+    if (m) vp8Ids.push(m[1]);
+  });
+
+  if (mLineIndex !== -1 && vp8Ids.length) {
+    const parts = lines[mLineIndex].trim().split(' ');
+    const header = parts.slice(0, 3); // ← was 4
+    const restIds = parts.slice(3);
+    const newList = [
+      ...vp8Ids,
+      ...restIds.filter(id => !vp8Ids.includes(id))
+    ];
+    lines[mLineIndex] = [...header, ...newList].join(' ');
+  }
+
+  return lines.join('\r\n');
 }

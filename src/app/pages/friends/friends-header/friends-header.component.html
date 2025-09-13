@@ -1,39 +1,42 @@
 <app-header title="Friends" [menu]="true">
-  <div id="end-buttons">
-    <ion-button
-      fill="clear"
-      shape="round"
-      class="mr-2"
-      routerLink="/tabs/messages"
-    >
+  <div id="end-buttons" class="badge-wrapper">
+    <ion-button fill="clear" shape="round" class="mr-2" routerLink="/tabs/messages">
       <i class="icon far fa-comments"></i>
     </ion-button>
+    <ng-container *ngIf="(messagesCount$ | async) as m">
+      <ion-badge *ngIf="m > 0" color="danger" class="badge-abs">{{ m }}</ion-badge>
+    </ng-container>
+
   </div>
 </app-header>
 
 <ion-row>
   <ion-col size="6" class="ion-no-padding">
     <ion-button
-        expand="block"
-        fill="clear"
-        class="ion-no-margin tab-button text-capitalize"
-        size="default"
-        routerLinkActive="selected"
-        routerLink="/tabs/friends/list"
-    >
+      expand="block"
+      fill="clear"
+      class="ion-no-margin tab-button text-capitalize"
+      size="default"
+      routerLinkActive="selected"
+      routerLink="/tabs/friends/list">
       Friends
     </ion-button>
   </ion-col>
+
   <ion-col size="6" class="ion-no-padding">
-    <ion-button
+    <div class="badge-wrapper w-full">
+      <ion-button
         expand="block"
         fill="clear"
         class="ion-no-margin tab-button text-capitalize"
         size="default"
         routerLinkActive="selected"
-        routerLink="/tabs/friends/requests"
-    >
-      Friend requests
-    </ion-button>
+        routerLink="/tabs/friends/requests">
+        Friend requests
+      </ion-button>
+      <ng-container *ngIf="(friendRequestsCount$ | async) as fr2">
+        <ion-badge *ngIf="fr2 > 0" color="danger" class="badge-abs-right">{{ fr2 }}</ion-badge>
+      </ng-container>
+    </div>
   </ion-col>
 </ion-row>

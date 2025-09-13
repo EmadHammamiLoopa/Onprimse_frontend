@@ -79,7 +79,7 @@ export class ProductComponent implements OnInit {
     } else {
       console.error('User data not found in localStorage');
       this.toastService.presentStdToastr('User data not found. Please log in again.');
-      this.router.navigateByUrl('/login'); // Redirect to login or handle appropriately
+      this.router.navigateByUrl('/auth/signin'); // Redirect to login or handle appropriately
     }
   }
 

@@ -14,6 +14,7 @@ import { DropDownComponent } from '../../drop-down/drop-down.component';
 import { UploadFileService } from 'src/app/services/upload-file.service';
 import { WebView } from '@ionic-native/ionic-webview/ngx';
 import { Camera } from '@ionic-native/camera/ngx';
+import { environment } from 'src/environments/environment';
 
 @Component({
   selector: 'app-display',
@@ -86,7 +87,7 @@ export class DisplayComponent implements OnInit {
       this.userService.getUserProfile(this.userId).subscribe({
         next: (user) => {
           if (user && user._id) {
-            this.user = user;
+            this.user = new User().initialize(user);  // <= IMPORTANT
             this.setMainAvatar();
             this.filterAvatars();  // Call filterAvatars here
             this.pageLoading = false;
@@ -108,6 +109,7 @@ export class DisplayComponent implements OnInit {
         next: (user) => {
           if (user && user._id) {
             this.user = user;
+            this.setMainAvatarFromUser(this.user);   // <— IMPORTANT
             this.checkIfFriend(); // Check if the user is a friend
             this.pageLoading = false;
             console.log('Loaded user data for another profile:', this.user);
@@ -180,7 +182,7 @@ export class DisplayComponent implements OnInit {
     this.userService.uploadAvatar(this.user._id, formData).subscribe({
       next: (response: any) => {
         this.userService.getUserProfile(response.user._id).subscribe((updatedUser) => {
-          this.user = updatedUser;
+          this.user = new User().initialize(updatedUser);  // <= wrap
           this.setMainAvatar();
           this.filterAvatars();
           this.updateUserInStorage(this.user.toObject());
@@ -285,7 +287,11 @@ export class DisplayComponent implements OnInit {
   }
   
   
-  
+  avatarUrl(src?: string): string {
+    if (!src) return 'assets/images/avatars/placeholder.png';
+    if (/^https?:\/\//i.test(src)) return src;     // already absolute
+    return `${environment.apiUrl}${src.startsWith('/') ? '' : '/'}${src}`;
+  }
 
   isDefaultAvatar(avatarUrl: string): boolean {
     return avatarUrl === constants.defaultMaleAvatarUrl ||
@@ -306,7 +312,30 @@ export class DisplayComponent implements OnInit {
     return this.sanitizer.bypassSecurityTrustUrl(url);
   }
 
+  
+  private computeMainAvatar(u: User): string {
+    if (!u) return '';
+  
+    // 1) explicit mainAvatar from API
+    if (u.mainAvatar) return u.mainAvatar;
+  
+    // 2) first custom avatar if any
+    if (Array.isArray(u.avatar) && u.avatar.length > 0) return u.avatar[0];
+  
+    // 3) default by gender
+    const g = (u.gender || '').toLowerCase();
+    if (g === 'male')   return constants.defaultMaleAvatarUrl;
+    if (g === 'female') return constants.defaultFemaleAvatarUrl;
+    if (g === 'other') return constants.defaultOtherAvatarUrl;
 
+    return constants.defaultOtherAvatarUrl;
+  }
+  
+  private setMainAvatarFromUser(u: User) {
+    this.mainAvatar = this.computeMainAvatar(u);
+  }
+
+  
   pickMedia(mediaType: 'image' | 'video', sourceType: number) {
     this.uploadFile.takePicture(sourceType, mediaType)
       .then((resp: any) => {
@@ -328,6 +357,7 @@ export class DisplayComponent implements OnInit {
               this.userService.getUserProfile(response.user._id).subscribe({
                 next: (updatedUser) => {
                   this.user = updatedUser;
+                  this.setMainAvatarFromUser(this.user);     // <— update main avatar
                   this.setMainAvatar();
                   this.filterAvatars();
                   this.updateUserInStorage(this.user.toObject());
@@ -591,25 +621,18 @@ export class DisplayComponent implements OnInit {
   }
 
   changeMainAvatar(avatar: string) {
-    console.log('Attempting to change main avatar to:', avatar);
-    this.userService.updateMainAvatar(this.user._id, avatar).subscribe(
-      (response: any) => {
-        if (response && response.user) {
-          console.log('Main avatar changed successfully:', response);
-          this.user.mainAvatar = avatar;
-          this.updateUserInStorage(this.user.toObject());
-          this.toastService.presentStdToastr('Main avatar updated');
-          this.changeDetectorRef.detectChanges();
-        } else {
-          console.error('Invalid response structure:', response);
-        }
+    this.userService.updateMainAvatar(this.user._id, avatar).subscribe({
+      next: (resp: any) => {
+        this.user.mainAvatar = avatar;
+        this.mainAvatar = avatar;                       // <= keep local state in sync
+        this.updateUserInStorage(this.user.toObject());
+        this.toastService.presentStdToastr('Main avatar updated');
+        this.changeDetectorRef.detectChanges();
       },
-      (error) => {
-        console.error('Error updating main avatar:', error);
-        this.toastService.presentStdToastr(error);
-      }
-    );
+      error: (e) => this.toastService.presentStdToastr(e)
+    });
   }
+  
   
   
   
@@ -715,6 +738,41 @@ export class DisplayComponent implements OnInit {
   }
   
 
+  private defaultSet = new Set([
+    constants.defaultMaleAvatarUrl,
+    constants.defaultFemaleAvatarUrl,
+    constants.defaultOtherAvatarUrl,
+  ]);
+  
+  private genderDefault(g?: string) {
+    if (g === 'male')   return constants.defaultMaleAvatarUrl;
+    if (g === 'female') return constants.defaultFemaleAvatarUrl;
+    if (g === 'other') return constants.defaultOtherAvatarUrl;
+
+    return constants.defaultOtherAvatarUrl;
+  }
+  
+  normalizeAvatarState() {
+    // 1) Normalize & dedupe
+    const avatars = Array.isArray(this.user?.avatar) ? this.user.avatar : [];
+    const unique   = [...new Set(avatars.filter(Boolean))];
+  
+    // 2) Remove defaults from the gallery list
+    const gallery = unique.filter(u => !this.defaultSet.has(u));
+  
+    // 3) Pick main
+    const main = this.user?.mainAvatar || gallery[0] || this.genderDefault(this.user?.gender);
+  
+    // 4) Commit state
+    this.mainAvatar = main;
+    this.user.mainAvatar = main;
+    this.user.avatar = gallery.filter(u => u !== main); // don’t show main in slider
+  
+    this.updateUserInStorage(this.user.toObject());
+    this.changeDetectorRef.detectChanges();
+  }
+
+  
   setMainAvatar() {
     const defaultAvatars = [
       constants.defaultMaleAvatarUrl,
@@ -741,7 +799,8 @@ export class DisplayComponent implements OnInit {
     this.changeDetectorRef.detectChanges();
   }
   
-  
+  trackByAvatar = (_: number, url: string) => url;
+
   
   async blockUserConf() {
     const alert = await this.alertCtrl.create({

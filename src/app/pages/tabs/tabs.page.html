@@ -1,10 +1,12 @@
-<ion-tabs>
+<!-- IMPORTANT: pass the tab string to avoid TS typing issue -->
+<ion-tabs (ionTabsDidChange)="onTabChanged(($any($event)?.tab) || ($any($event)?.detail?.tab))">
   <ion-tab-bar color="light" slot="bottom">
     <ion-tab-button *ngFor="let tab of tabs" [tab]="tab.url">
-      <i [class]="'icon ' + tab.icon" [style.color]="tab.iconColor"></i>
-      <ion-badge *ngIf="tab.badgeCount && tab.badgeCount > 0" color="danger">
-        {{ tab.badgeCount }}
-      </ion-badge>
+      <i [class]="'icon ' + tab.icon"></i>
+
+      <ng-container *ngIf="(badge$(tab.url) | async) as b">
+        <ion-badge *ngIf="b > 0" color="danger">{{ b }}</ion-badge>
+      </ng-container>
     </ion-tab-button>
   </ion-tab-bar>
 </ion-tabs>

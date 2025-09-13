@@ -1,212 +1,92 @@
-<ion-card
-  [style]="{'--background': post.backgroundColor, '--color': post.color}"
-  class="mb-0 p-2"
->
-  <div class="d-flex justify-content-between">
-    <div [style]="{'--color': post.color}">
-      <span (click)="showUserProfile(post.user.id)">
-        <span class="mr-1" *ngIf="post.anonyme"><i class="fas fa-user-secret"></i></span>
-        <span class="mr-1" *ngIf="!post.anonyme"><i class="fas fa-user"></i></span>
-        {{ postUserName(post) }}
-      </span>
-      <small class="date">
-        {{ post.createdAt | extractDiffTime }}
-      </small>
-
-    <ng-container *ngIf="post.user.id === user.id">
-  <ion-button
-    shape="round"
-    class="visibility-toggle-btn"
-    [style]="{'--color': post.color}"
-    fill="clear"
-    size="small"
-    (click)="toggleVisibilityOptions($event)"
-  >
-    <ion-icon name="eye"></ion-icon>
-  </ion-button>
-  
-  <!-- Custom visibility options dropdown -->
-  <div class="custom-popover" [ngClass]="{'show': visibilityOptionsOpen}" #dropdown>
-    <ion-list class="visibility-dropdown">
-      <ion-item button (click)="changeVisibility('public')">
-        <ion-icon name="earth" slot="start"></ion-icon>
-        <ion-label>Public</ion-label>
-      </ion-item>
-
-      <ion-item button (click)="changeVisibility('friends-only')">
-        <ion-icon name="people" slot="start"></ion-icon>
-        <ion-label>Friends</ion-label>
-      </ion-item>
-      
-      <ion-item button (click)="changeVisibility('private')">
-        <ion-icon name="lock-closed" slot="start"></ion-icon>
-        <ion-label>Only me</ion-label>
-      </ion-item>
-
-    </ion-list>
-  </div>
-</ng-container>
-      <div class="pl-2 pr-2 py-2">
-        <span>{{ post.text }}</span>
-      </div>
+<ion-card class="jodel-card" [style]="{'--post-bg': post.backgroundColor, '--post-fg': post.color}">
+  <!-- header -->
+  <div class="jdl-h">
+    <div class="jdl-user" [style]="{'color':'var(--post-fg)'}" (click)="showUserProfile(post.user.id)">
+      <i *ngIf="post.anonyme" class="fas fa-user-secret"></i>
+      <i *ngIf="!post.anonyme" class="fas fa-user"></i>
+      <span class="name">{{ postUserName(post) }}</span>
+      <span class="dot">•</span>
+      <span class="date">{{ post.createdAt | extractDiffTime }}</span>
     </div>
-    <div class="pr-2">
-      <ion-button
-        shape="round"
-        class="d-block ion-no-margin ion-no-padding"
-        [style]="{'--color': post.color}"
-        fill="clear"
-        size="small"
-        (click)="presentPopover($event)"
-      >
-        <i class="fas fa-ellipsis-v"></i>
-      </ion-button>
-      <ion-button
-        shape="round"
-        class="d-block ion-no-margin ion-no-padding px-1"
-        [style]="{'--color': post.color}"
-        fill="clear"
-        size="small"
-        (click)="voteOnPost(1)"
-      >
-        <i class="fas fa-chevron-up"></i>
-      </ion-button>
-      <ion-button
-        shape="round"
-        class="d-block ion-no-margin ion-no-padding px-1"
-        [style]="{'--color': post.color}"
-        fill="clear"
-        size="small"
-        disabled
-      >
-        <span class="font-weight-bold">{{ post.votes }}</span>
-      </ion-button>
-      <ion-button
-        shape="round"
-        class="d-block ion-no-margin ion-no-padding px-1"
-        [style]="{'--color': post.color}"
-        fill="clear"
-        size="small"
-        (click)="voteOnPost(-1)"
-      >
-        <i class="fas fa-chevron-down"></i>
-      </ion-button>
-
-      <!-- Visibility change button and dropdown only visible to the post creator -->
- <!-- Visibility change button and dropdown only visible to the post creator -->
-
-
-      
-      
-    </div>
-  </div>
-
-
-    <!-- Display Event-specific Fields for static_events channels -->
-    <div *ngIf="channel.type === 'static_events'">
-      <div class="event-details mt-2">
-        <!-- Event Date -->
-        <ion-item 
-          [style]="{'--background': post.backgroundColor, '--color': post.color}" 
-          class="ion-margin-bottom"
-        >
-          <ion-label>Date</ion-label>
-          <span>{{ post.eventDate | date: 'dd/MM/yyyy' }}</span> <!-- Display date in better format -->
-        </ion-item>
-    
-        <!-- Event Location -->
-        <ion-item 
-          [style]="{'--background': post.backgroundColor, '--color': post.color}" 
-          class="ion-margin-bottom"
-        >
-          <ion-label>Location</ion-label>
-          <span>{{ post.eventLocation }}</span>
-        </ion-item>
-    
-        <!-- Event Time -->
-        <ion-item 
-          [style]="{'--background': post.backgroundColor, '--color': post.color}" 
-          class="ion-margin-bottom"
-        >
-          <ion-label>Time</ion-label>
-          <span>{{ post.eventTime | date: 'shortTime' }}</span> <!-- Display time in better format -->
-        </ion-item>
-      </div>
-    </div>
-    
-      <!-- Display Dating-specific Fields for static_dating channels -->
-  <div *ngIf="channel.type === 'static_dating'">
-    <div class="dating-details mt-2">
-      <!-- Relationship Goals -->
-      <ion-item [style]="{'--background': post.backgroundColor, '--color': post.color}" class="ion-margin-bottom">
-        <ion-label>Relationship Goals</ion-label>
-        <span>{{ post.relationshipGoals }}</span>
-      </ion-item>
-
-      <!-- Age Range -->
-      <ion-item [style]="{'--background': post.backgroundColor, '--color': post.color}" class="ion-margin-bottom">
-        <ion-label>Age Range</ion-label>
-        <span>{{ post.ageRange.min }} - {{ post.ageRange.max }}</span>
-      </ion-item>
-
-      <!-- Interests or Hobbies -->
-      <ion-item [style]="{'--background': post.backgroundColor, '--color': post.color}" class="ion-margin-bottom">
-        <ion-label>Interests or Hobbies</ion-label>
-        <span>{{ post.interests.join(', ') }}</span>
-      </ion-item>
-
-      <!-- Hint about me -->
-      <ion-item [style]="{'--background': post.backgroundColor, '--color': post.color}" class="ion-margin-bottom">
-        <ion-label>Hint about me</ion-label>
-        <span>{{ post.hintAboutMe }}</span>
-      </ion-item>
-    </div>
-  </div>
-  
-  <!-- Media Section -->
-<!-- Media Section -->
-<!-- Media Section (only display if media URL exists) -->
-<div *ngIf="mediaUrl" class="media-section mt-2">
-  <div class="media-container" (click)="toggleImageSize()">
-    <!-- Display image if media is an image -->
-    <img *ngIf="post.media?.url?.endsWith('.jpg') || post.media?.url?.endsWith('.webp') || post.media?.url?.endsWith('.png')" 
-      [src]="mediaUrl" 
-      alt="Post Media" 
-      class="post-media-img" 
-      [ngClass]="{'enlarged': isImageEnlarged, 'small-preview': !isImageEnlarged}" />
-
-    <!-- Display video if media is a video -->
-    <video *ngIf="post.media?.url?.endsWith('.mp4') || post.media?.url?.endsWith('.webm')" 
-      [src]="mediaUrl" 
-      controls class="post-media-video"></video>
-
-    <!-- Expiration progress bar for media -->
-    <div *ngIf="post.media?.expiryDate && getTimeRemaining(post.media.expiryDate.toISOString()) !== ''" 
-         class="expiry-circle-wrapper fancy-expiry">
-      <div class="expiry-circle">
-        <svg class="circle-svg">
-          <circle cx="50%" cy="50%" r="45%"></circle>
-          <circle class="circle-progress" cx="50%" cy="50%" r="45%"
-          [attr.style]="getExpirationProgress(post.media.expiryDate.toISOString())"
-          [attr.stroke]="getCircleColor(post.media.expiryDate.toISOString())"></circle>
-        </svg>
-        <div class="circle-text">{{ getTimeRemaining(post.media.expiryDate.toISOString()) }}</div>
-      </div>
-    </div>
-  </div>
+<!-- Fullscreen overlay image (click anywhere to close) -->
+<div class="img-fs" *ngIf="isImageEnlarged" (click)="toggleImageSize()">
+  <img [src]="mediaUrl" alt="media" class="img-fs-img" />
 </div>
 
+    <div class="jdl-h-actions">
+      <ion-button class="icon-btn" fill="clear" size="small" (click)="presentPopover($event)">
+        <i class="fas fa-ellipsis-v"></i>
+      </ion-button>
 
-  <ion-button
-    size="small"
-    class="d-block ion-no-margin ion-no-padding"
-    shape="round"
-    fill="clear"
-    [style]="{'color': post.color}"
-    (click)="showComments()"
-    *ngIf="showCommentsBtn"
-  >
-    <i class="far fa-comments mr-1"></i>
-    <span>{{ post.comments?.length }} comments</span>
-  </ion-button>
+      <ng-container *ngIf="post.user.id === user.id">
+        <div class="rel">
+          <ion-button class="icon-btn" fill="clear" size="small" (click)="toggleVisibilityOptions($event)">
+            <ion-icon name="eye"></ion-icon>
+          </ion-button>
+          <div class="custom-popover" [ngClass]="{'show': visibilityOptionsOpen}" #dropdown>
+            <ion-list class="visibility-dropdown">
+              <ion-item button (click)="changeVisibility('public')">
+                <ion-icon name="earth" slot="start"></ion-icon><ion-label>Public</ion-label>
+              </ion-item>
+              <ion-item button (click)="changeVisibility('friends-only')">
+                <ion-icon name="people" slot="start"></ion-icon><ion-label>Friends</ion-label>
+              </ion-item>
+              <ion-item button (click)="changeVisibility('private')">
+                <ion-icon name="lock-closed" slot="start"></ion-icon><ion-label>Only me</ion-label>
+              </ion-item>
+            </ion-list>
+          </div>
+        </div>
+      </ng-container>
+    </div>
+  </div>
+
+  <!-- text -->
+  <div class="jdl-text" [style]="{'color':'var(--post-fg)'}">{{ post.text }}</div>
+
+  <!-- meta (events / dating) -->
+  <div *ngIf="channel.type === 'static_events'" class="jdl-meta">
+    <div><strong>Date</strong> {{ post.eventDate | date:'dd/MM/yyyy' }}</div>
+    <div><strong>Location</strong> {{ post.eventLocation }}</div>
+    <div><strong>Time</strong> {{ post.eventTime | date:'shortTime' }}</div>
+  </div>
+
+  <div *ngIf="channel.type === 'static_dating'" class="jdl-meta">
+    <div><strong>Goals</strong> {{ post.relationshipGoals }}</div>
+    <div><strong>Age</strong> {{ post.ageRange.min }}–{{ post.ageRange.max }}</div>
+    <div><strong>Interests</strong> {{ post.interests.join(', ') }}</div>
+    <div><strong>Hint</strong> {{ post.hintAboutMe }}</div>
+  </div>
+
+  <!-- media -->
+  <div *ngIf="mediaUrl" class="jdl-media" (click)="toggleImageSize()">
+    <img *ngIf="post.media?.url?.endsWith('.jpg') || post.media?.url?.endsWith('.webp') || post.media?.url?.endsWith('.png')"
+         [src]="mediaUrl" alt="media"
+         [class.enlarged]="isImageEnlarged"/>
+    <video *ngIf="post.media?.url?.endsWith('.mp4') || post.media?.url?.endsWith('.webm')"
+           [src]="mediaUrl" controls playsinline></video>
+
+    <div *ngIf="post.media?.expiryDate && getTimeRemaining(post.media.expiryDate.toISOString()) !== ''"
+         class="expiry-badge">
+      {{ getTimeRemaining(post.media.expiryDate.toISOString()) }}
+    </div>
+  </div>
+
+  <!-- actions: ↑ score ↓ • comments -->
+  <div class="jdl-actions">
+    <ion-button class="icon-btn" fill="clear" size="small" (click)="voteOnPost(1)">
+      <i class="fas fa-chevron-up"></i>
+    </ion-button>
+    <span class="score">{{ post.votes }}</span>
+    <ion-button class="icon-btn" fill="clear" size="small" (click)="voteOnPost(-1)">
+      <i class="fas fa-chevron-down"></i>
+    </ion-button>
+
+    <div class="spacer"></div>
+
+    <ion-button *ngIf="showCommentsBtn" class="icon-btn" fill="clear" size="small" (click)="showComments()">
+      <i class="far fa-comments"></i>
+      <span class="c-count">{{ post.comments?.length }} comments</span>
+    </ion-button>
+  </div>
 </ion-card>

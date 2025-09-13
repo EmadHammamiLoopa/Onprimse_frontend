@@ -1,4 +1,6 @@
 import { Component, OnInit } from '@angular/core';
+import { Observable } from 'rxjs';
+import { AppEventsService } from 'src/app/services/app-events.service';
 
 @Component({
   selector: 'app-friends-header',
@@ -6,9 +8,13 @@ import { Component, OnInit } from '@angular/core';
   styleUrls: ['./friends-header.component.scss'],
 })
 export class FriendsHeaderComponent implements OnInit {
+  messagesCount$: Observable<number>;
+  friendRequestsCount$: Observable<number>;
 
-  constructor() { }
+  constructor(private appEvents: AppEventsService) {}
 
-  ngOnInit() {}
-
+  ngOnInit() {
+    this.messagesCount$ = this.appEvents.badge$('messages');
+    this.friendRequestsCount$ = this.appEvents.badge$('friends');
+  }
 }

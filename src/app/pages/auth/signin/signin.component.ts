@@ -78,8 +78,9 @@ export class SigninComponent implements OnInit {
         console.log('✅ WebSocket initialized successfully');
     
         // ✅ 2️⃣ Then register the user after connection established
-        SocketService.registerUser(resp.data.user._id);
-    
+        await SocketService.initializeSocket(); // after you store token
+        SocketService.bindToAuthUser();         // no params
+
         // ✅ 3️⃣ Optional: check if socket instance is live
         const socket = await SocketService.getSocket();
         console.log('✅ WebSocket instance retrieved:', socket.id);
@@ -148,8 +149,8 @@ export class SigninComponent implements OnInit {
       console.log('✅ WebSocket initialized successfully');
   
       // ✅ 2️⃣ Register the user after connection established
-      SocketService.registerUser(resp.data.user._id);
-  
+  await SocketService.initializeSocket(); // after you store token
+  SocketService.bindToAuthUser();         // no params  
       // ✅ 3️⃣ Optional: Check if socket instance is live
       const socket = await SocketService.getSocket();
       console.log('✅ WebSocket instance retrieved:', socket.id);

@@ -31,7 +31,11 @@ export class SignupComponent implements OnInit {
   selectedCountry: string = '';
   selectedCity: string = '';
   selectedInterests: string[] = [];
-
+  studyCountries: string[] = [];
+  selectedStudyCountry: string = '';
+  isLoadingSchools = false;
+  
+  
   schools: string[] = [];
   educations: string[] = [];
   professions: string[] = [];
@@ -59,7 +63,6 @@ export class SignupComponent implements OnInit {
     this.loadEducations();
     this.loadProfessions();
     this.loadInterests();
-    this.loadSchools();
   }
 
   initializeForm() {
@@ -73,6 +76,7 @@ export class SignupComponent implements OnInit {
       receiveRandomRequests: [false],
       showAge: [false],
       gender: ['', [Validators.required]],
+      studyCountry: [''],       
       school: [''],
       education: [''],
       profession: [''],
@@ -82,11 +86,7 @@ export class SignupComponent implements OnInit {
   }
   
 
-  async loadSchools() {
-    this.schoolService.getUniversities().subscribe((response: any) => {
-      this.schools = response.map((school: any) => school.name);
-    });
-  }
+
 
   addInterests(event: Event) {
     const customEvent = event as CustomEvent<any>; // Casting event to CustomEvent
@@ -94,7 +94,7 @@ export class SignupComponent implements OnInit {
   
     if (Array.isArray(interests)) { // Ensure interests is an array
       interests.forEach((interest: string) => {
-        if (this.selectedInterests.length < 10 && !this.selectedInterests.includes(interest)) {
+        if (!this.selectedInterests.includes(interest)) {
           this.selectedInterests.push(interest);
         }
       });
@@ -117,6 +117,8 @@ export class SignupComponent implements OnInit {
     const countries = await this.jsonService.getCountries();
     this.countriesObject = countries;
     this.countries = Object.keys(this.countriesObject);
+    this.studyCountries = this.countries;
+
   }
 
   async loadEducations() {
@@ -160,11 +162,52 @@ export class SignupComponent implements OnInit {
       school: String(this.form.get('school')?.value || ''), // Ensure it's a string
       education: String(this.form.get('education')?.value || ''), // Ensure it's a string
       profession: String(this.form.get('profession')?.value || ''), // Ensure it's a string
-      interests: this.selectedInterests.join(','), // Convert array to comma-separated string if needed
+      interests: this.selectedInterests.map(s => s.trim()).filter(Boolean),
       aboutMe: this.form.get('aboutMe')?.value
     };
   }
   
+
+    // NEW: modal to pick country of study
+    async presentStudyCountriesModal() {
+      const modal = await this.modalController.create({
+        component: ListSearchComponent,
+        componentProps: { data: this.studyCountries, title: 'Country of Study' }
+      });
+      await modal.present();
+      const { data } = await modal.onDidDismiss();
+      if (data) {
+        const country = typeof data === 'string' ? data : (data.name ?? '');
+        if (country !== this.selectedStudyCountry) {
+          this.selectedStudyCountry = country;
+          this.form.get('studyCountry')?.setValue(country);
+          this.form.get('school')?.reset('');    // clear previous choice
+          this.schools = [];
+          this.isLoadingSchools = true;
+          this.schoolService.getUniversityNames(country).subscribe({
+            next: names => { this.schools = names; this.isLoadingSchools = false; },
+            error: () => { this.isLoadingSchools = false; }
+          });
+        }
+      }
+    }
+    
+  
+    // NEW: fetch school names for selected country
+    loadSchoolsForCountry(country: string) {
+      this.schoolService.getUniversityNames(country).subscribe((names: string[]) => {
+        this.schools = names;
+      });
+    }
+  
+    // OPTIONAL: keep a guarded version if something else calls it
+    async loadSchools() {
+      if (!this.selectedStudyCountry) {
+        this.schools = [];
+        return;
+      }
+      this.loadSchoolsForCountry(this.selectedStudyCountry);
+    }
 
   backToError() {
     for (let ind = 0; ind < this.steps.length; ++ind) {
@@ -224,18 +267,25 @@ export class SignupComponent implements OnInit {
   async presentCountriesModal() {
     const modal = await this.modalController.create({
       component: ListSearchComponent,
-      componentProps: {
-        data: this.countries,
-        title: 'Countries'
-      }
+      componentProps: { data: this.countries, title: 'Countries' }
     });
     await modal.present();
     const { data } = await modal.onDidDismiss();
-    if (data) {
-      this.selectedCountry = data;
-      this.cities = this.countriesObject[this.selectedCountry];
+  
+    if (data !== undefined && data !== null) {
+      const picked = typeof data === 'string' ? data : (data.name ?? '');
+      const country = (picked || '').trim();  // normalize
+  
+      // Only update if changed
+      if (country !== (this.selectedCountry || '')) {
+        this.selectedCountry = country;
+        this.cities = this.countriesObject[this.selectedCountry] || [];
+        this.selectedCity = ''; // reset so City placeholder shows
+      }
     }
   }
+  
+  
 
   async presentCitiesModal() {
     const modal = await this.modalController.create({
@@ -253,18 +303,15 @@ export class SignupComponent implements OnInit {
   }
 
   async presentSchoolsModal() {
+    if (!this.selectedStudyCountry || this.isLoadingSchools || !this.schools.length) return;
+  
     const modal = await this.modalController.create({
       component: ListSearchComponent,
-      componentProps: {
-        data: this.schools,
-        title: 'Schools'
-      }
+      componentProps: { data: [...this.schools], title: 'Select University' } // pass a copy
     });
     await modal.present();
     const { data } = await modal.onDidDismiss();
-    if (data) {
-      this.form.get('school')?.setValue(data);
-    }
+    if (data) this.form.get('school')?.setValue(data);
   }
 
   async presentEducationsModal() {

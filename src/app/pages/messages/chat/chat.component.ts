@@ -19,17 +19,28 @@ import { DomSanitizer, SafeUrl } from '@angular/platform-browser';
 import { take } from 'rxjs/operators';
 import { File as IonicFile, FileEntry } from '@ionic-native/file/ngx';
 import { FilePath } from '@ionic-native/file-path/ngx';
+import { NgZone } from '@angular/core';
+import { AppEventsService } from 'src/app/services/app-events.service';
 
 interface ImageFileObject {
   file: File;
   imageData: string;
 }
 
+// ⬇️  put this just above the class or anywhere in the file ­- it’s private to the module
+const waitUntil = (cond: () => boolean, step = 100) =>
+  new Promise<void>(res => {
+    const t = setInterval(() => cond() && (clearInterval(t), res()), step);
+  });
+
 @Component({
   selector: 'app-chat',
   templateUrl: './chat.component.html',
   styleUrls: ['./chat.component.scss'],
 })
+
+
+
 export class ChatComponent implements OnInit {
   videoCallDeclined = false;
 
@@ -40,6 +51,7 @@ export class ChatComponent implements OnInit {
 
   sentMessages = {};
   index = 0;
+  private listenersBound = false;
 
   image: string = null;
   imageFile: ImageFileObject = null;
@@ -69,7 +81,7 @@ export class ChatComponent implements OnInit {
   constructor(private camera: Camera, private userService: UserService, private route: ActivatedRoute,private sanitizer: DomSanitizer,
               private messageService: MessageService, private changeDetection: ChangeDetectorRef,
               private platform: Platform, private uploadFileService: UploadFileService, private webView: WebView,  private file: IonicFile,
-              private filePath: FilePath,
+              private filePath: FilePath,private zone: NgZone, private badges: AppEventsService,
               private toastService: ToastService, private location: Location, private router: Router, private productService: ProductService, 
               private alertController: AlertController, private socketService: SocketService, private nativeStorage: NativeStorage) {
                 
@@ -85,7 +97,7 @@ export class ChatComponent implements OnInit {
         console.log("User ID detected:", userId);
         this.getUserProfile(userId);
         this.videoCallDeclined = false;
-        this.initializeSocket(userId); // Pass userId directly
+        this.initializeSocket(); // Pass userId directly
 
       }
     });
@@ -136,6 +148,8 @@ export class ChatComponent implements OnInit {
 
   ionViewWillEnter() {
     console.log("ionViewWillEnter called");
+    this.badges.reset('messages');
+
     this.pageLoading = true;
     this.getUserId();
     if (this.authUser && this.authUser.id) {
@@ -156,6 +170,14 @@ export class ChatComponent implements OnInit {
   
   toggleMediaOptions() {
     this.showMediaOptions = !this.showMediaOptions;
+  }
+
+  private markThreadRead() {
+    if (this.socket?.connected && this.user?.id) {
+      this.socket.emit('mark-thread-read', { peerId: this.user.id });
+    }
+    // ✅ also hard reset locally
+    this.badges.reset('messages');
   }
 
   getProductDetails(productId: string, event?) {
@@ -184,18 +206,16 @@ export class ChatComponent implements OnInit {
 
   
   acceptVideoCall(message: Message) {
-    // Emit accept event
-    this.socket.emit('video-call-accepted', {
+    SocketService.emit('video-call-accepted', {
       from: this.authUser.id,
       to: message.from,
       messageId: message.id
     });
-  
-    this.user.isFriend = true;  // Now enable video button!
+    this.user.isFriend = true;
   }
   
   declineVideoCall(message: Message) {
-    this.socket.emit('video-call-declined', {
+    SocketService.emit('video-call-declined', {
       from: this.authUser.id,
       to: message.from,
       messageId: message.id
@@ -252,14 +272,14 @@ export class ChatComponent implements OnInit {
 
   handleUserInitError() {
     this.pageLoading = false;
-    this.router.navigate(['/login']);
+    this.router.navigate(['/auth/signin']);
   }
 
   getUserId() {
-    if (this.authUser && this.authUser._id) {
+    if (this.authUser && this.authUser.id) {
       this.route.paramMap.subscribe(params => {
         const id = params.get('id');
-        if (id && this.authUser._id !== id) {
+        if (id && this.authUser.id !== id) {
           this.getUserProfile(id); // Fetch the recipient's profile (seller)
         } else {
           console.error('Recipient ID is the same as authenticated user ID or missing');
@@ -272,68 +292,49 @@ export class ChatComponent implements OnInit {
   }
   
   
+getUserProfile(userId: string) {
+  if (!userId) { this.pageLoading = false; return; }
 
-  getUserProfile(userId: string) {
-    if (!userId) {
+  console.log('Fetching profile for user ID:', userId);
+  this.userService.getUserProfile(userId).subscribe(
+    async (resp: any) => {
+      const raw = resp?.data ?? resp;                         // unchanged
+      if (!raw) {                                             // unchanged
+        this.pageLoading = false;
+        this.toastService.presentStdToastr('Sorry, this user is not available');
+        return this.location.back();
+      }
+
+      this.user = new User().initialize(raw);
+      console.log('Recipient stored:', this.user);
+
+      /* 🆕  wait until authUser is ready, then load only once */
+      await waitUntil(() => !!this.authUser?.id);
+      if (!this.messages.length) this.getMessages();          // prevents duplicate loads
+    },
+    err => {                                                  // unchanged
       this.pageLoading = false;
-      return;
+      this.toastService.presentStdToastr('Sorry, this user is not available');
+      this.location.back();
     }
-    console.log('Fetching profile for user ID:', userId);
-    this.userService.getUserProfile(userId)
-      .subscribe(
-        (resp: any) => {
-          if (resp && resp.data) {
-            this.user = new User().initialize(resp.data);
-            console.log("Recipient user data fetched and stored:", this.user);
-            this.getMessages(null);
-          } else if (resp) {
-            this.user = new User().initialize(resp);
-            console.log("Recipient user data fetched and stored:", this.user);
-            this.getMessages(null);
-          } else {
-            this.pageLoading = false;
-            console.error('User profile data is undefined or null');
-            this.toastService.presentStdToastr('Sorry, this user is not available');
-            this.location.back();
-          }
-        },
-        err => {
-          this.pageLoading = false;
-          console.error('Error fetching user profile:', err);
-          this.toastService.presentStdToastr('Sorry, this user is not available');
-          this.location.back();
-        }
-      );
-  }
-  
-  
-  
-async initializeSocket(userId: string) {
-  if (!userId) {
-    console.error("❌ User ID missing");
-    return;
-  }
+  );
+}
 
+  
+  
+  
+async initializeSocket() {
   try {
     await SocketService.initializeSocket();
     this.socket = await SocketService.getSocket();
-    
-    // Only register user if not already connected
-    if (!this.socket.connected) {
-      console.warn("⚠️ Socket not connected, reinitializing...");
-      await SocketService.initializeSocket();
-    }
 
-    // Register user with the server
-    SocketService.registerUser(userId);
-    
-    // Initialize listeners
+    // (Optional but safe/idempotent) ensure the server binds this socket to the JWT user
+    SocketService.bindToAuthUser();
+
     this.initSocketListeners();
-    
   } catch (error) {
     console.error("❌ Socket initialization failed:", error);
-    // Retry after delay
-    setTimeout(() => this.initializeSocket(userId), 5000);
+    setTimeout(() => this.initializeSocket(), 5000);
   }
 }
   
@@ -420,7 +421,7 @@ formatMessageTime(date: Date | string): string {
     if (!this.socket) {
       console.warn("⚠️ WebSocket is not ready. Trying to reinitialize...");
       if (this.user?.id) {
-        await this.initializeSocket(this.user.id);
+        await this.initializeSocket();
       } else {
         console.error("❌ Cannot reinitialize WebSocket: User ID missing.");
         return;
@@ -444,7 +445,8 @@ formatMessageTime(date: Date | string): string {
         this.pageLoading = false;
         return;
       }
-  
+      if (this.page === 1) this.markThreadRead();
+
       // Ensure no duplicate messages are pushed
       const newMessages = resp.data.messages.map(msg => {
         if (msg.image && typeof msg.image === 'object' && msg.image.path) {
@@ -511,106 +513,84 @@ formatMessageTime(date: Date | string): string {
 
   initSocketListeners() {
     if (!this.socket) {
-      console.error("❌ WebSocket not initialized. Cannot listen for messages.");
+      console.error("❌ WebSocket not initialized.");
       return;
     }
+    if (this.listenersBound) return;  // already bound once, don't rebind
+    this.listenersBound = true;
   
-    this.socket.on('new-message', (message) => {
-      console.log("📩 New message received from WebSocket:", message);
-  
-      if (typeof message === "string") {
-        message = JSON.parse(message);
+    // helper to normalize any message payload
+    const normalize = (m: any): Message => {
+      const copy: any = { ...m };
+      copy.id = copy.id || copy._id || `${copy.from}-${copy.to}-${copy.createdAt || Date.now()}`;
+      copy.createdAt = copy.createdAt ? new Date(copy.createdAt) : new Date();
+      if (copy.image && typeof copy.image === 'object' && copy.image.path) {
+        copy.image = copy.image.path;
       }
+      return new Message().initialize(copy);
+    };
   
-      // Check if this is a duplicate message
-      const isDuplicate = this.messages.some(m => 
-        m.id === message.id || 
-        (m.text === message.text && 
-         m.from === message.from && 
-         Math.abs(new Date(m.createdAt).getTime() - new Date(message.createdAt).getTime()) < 1000)
-      );
+    this.socket.on('new-message', (raw: any) => {
+      this.zone.run(() => {
+        try {
+          if (typeof raw === 'string') raw = JSON.parse(raw);
+          const msg = normalize(raw);
   
-      if (isDuplicate) {
-        console.log("🔄 Duplicate message detected, ignoring");
-        return;
-      }
+          // (optional) only show messages for this thread
+          if (this.user && (msg.from === this.user.id || msg.to === this.user.id)) {
+            // ✅ ensure server/client know it’s read
+            this.markThreadRead();
+          }
+            
+          if (this.messages.some(m => m.id === msg.id)) return; // dedupe
   
-      // Handle video call requests
-      if (message.type === 'video-call-request') {
-        this.handleIncomingVideoCall(message);
-        return;
-      }
-  
-      this.messages.push(new Message().initialize(message));
-      this.groupMessagesByDate();
-      this.scrollToBottom();
+          this.messages.push(msg);
+          this.groupMessagesByDate();
+          this.scrollToBottom();
+        } catch (e) {
+          console.error('Failed to process incoming message:', e, raw);
+        }
+      });
     });
-
-    this.socket.on('video-call-accepted', (data) => {
-      console.log("✅ Video call accepted:", data);
-      this.user.isFriend = true;
-      this.toastService.presentStdToastr(`${this.user.fullName} accepted your video call`);
+  
+    this.socket.on('message-sent', (saved: any) => {
+      this.zone.run(() => {
+        const msg = normalize({ ...saved, id: saved._id || saved.id, state: 'sent' });
+        const i = this.messages.findIndex(m => m.id === msg.id);
+        if (i !== -1) this.messages[i] = msg;
+        else this.messages.push(msg);
+        this.groupMessagesByDate();
+      });
     });
-    
-    this.socket.on('video-call-declined', (data) => {
-      console.log("❌ Video call declined:", data);
-      this.toastService.presentStdToastr(`${this.user.fullName} declined your video call`);
-    
-      // 🔥 HERE: add this line
-      if (data.to === this.authUser.id) {
-        this.videoCallDeclined = true;
-      }
+  
+    this.socket.on('user-status-changed', (data: any) => {
+      this.zone.run(() => {
+        const userId = data?.userId ?? data?.user?.id ?? data?.id;
+        if (userId && this.user?.id === userId) {
+          this.user.online = !!data.online;
+          // reassign to trigger change detection in some templates
+          this.user = Object.assign(new User(), this.user);
+          this.changeDetection.detectChanges();
+        }
+      });
     });
-    
-    this.socket.on('message-sent', (savedMessage) => {
-      console.log("✅ Message sent confirmation received:", savedMessage);
-    
-      // Normalize _id to id
-      savedMessage.id = savedMessage._id;
-    
-      const index = this.messages.findIndex(m => m.id === savedMessage.id);
-      if (index !== -1) {
-        this.messages[index] = new Message().initialize({
-          ...savedMessage,
+  
+    this.socket.on('incoming-video-call', (data: any) => {
+      this.zone.run(() => {
+        const msg = normalize({
+          id: data.messageId,
+          from: data.from,
+          to: data.to,
+          text: data.text,
+          type: 'video-call-request',
+          createdAt: new Date(),
           state: 'sent'
         });
-        this.groupMessagesByDate();
-      } else {
-        console.warn("⚠️ Message not found in local list, pushing it manually");
-        this.messages.push(new Message().initialize({
-          ...savedMessage,
-          state: 'sent'
-        }));
-        this.groupMessagesByDate();
-      }
-    });
-    
-    
-    this.socket.on('user-status-changed', (data) => {
-      console.log("📡 User status changed:", data);
-      if (data.userId === this.user.id) {
-        this.user.online = data.online;
-        this.user = Object.assign(new User(), this.user);
-        this.changeDetection.detectChanges();
-      }
-    });
-    
-        this.socket.on('incoming-video-call', (data) => {
-        console.log("📞 Incoming video call received:", data);
-
-        const message: Message = new Message().initialize({
-            id: data.messageId,
-            from: data.from,
-            to: data.to,
-            text: data.text,
-            type: 'video-call-request',
-            createdAt: new Date(),
-            state: 'sent'
-        });
-
-        this.handleIncomingVideoCall(message);
+        this.handleIncomingVideoCall(msg);
+      });
     });
   }
+  
   
   private handleIncomingVideoCall(message: Message) {
     if (message.from === this.authUser.id) {
@@ -652,7 +632,7 @@ formatMessageTime(date: Date | string): string {
 
   resendMessage(message) {
     this.resend.push(message.id);
-    this.sendMessage(message, message.id);
+    this.sendMessage(message);
   }
 
   getChatPermission() {
@@ -777,52 +757,33 @@ sanitizeImageUrl(url: string): SafeUrl {
 }
 
 
-async sendMessage(message: any, ind: number): Promise<boolean> {
-  if (!this.socket) {
-    console.warn("⚠️ WebSocket is not ready. Trying to retrieve...");
-    this.socket = await SocketService.getSocket();
-    if (!this.socket) {
-      console.error("❌ WebSocket is still not available. Aborting send.");
-      return false;
-    }
-  }
-
-  let imageUrl = null;
-  if (this.imageFile?.file) {
-    imageUrl = await this.uploadImageAndGetUrl();
-    if (!imageUrl) {
-      // Remove the temporary message if upload failed
-      const index = this.messages.findIndex(m => m.id === message.id);
-      if (index !== -1) {
-        this.messages.splice(index, 1);
-        this.groupMessagesByDate();
-      }
-      return false;
-    }
-  }
-
+async sendMessage(message: any /*, ind?: number */): Promise<boolean> {
+  // Build final payload (trust message.image which was uploaded in addMessage)
   const payload = {
     id: message.id,
     from: this.authUser.id,
     to: this.user.id,
-    text: message.text ?? '', // ensures it's always a string
+    text: message.text ?? '',
     state: 'sending',
-    image: imageUrl || null,
-    type: message.type || 'text',
-    productId: this.productId || null,
-    createdAt: new Date()
+    image: message.image ?? null,
+    type: message.type || (this.productId ? 'product' : 'friend'),
+    productId: message.productId ?? this.productId ?? null,
+    createdAt: message.createdAt || new Date(),
   };
 
-  const messageIndex = this.messages.findIndex(m => m.id === message.id);
-  if (messageIndex !== -1) {
-    this.messages[messageIndex] = new Message().initialize(payload);
+  // Update local temp message immediately
+  const idx = this.messages.findIndex(m => m.id === message.id);
+  if (idx !== -1) {
+    this.messages[idx] = new Message().initialize(payload);
     this.groupMessagesByDate();
   }
 
-  this.socket.emit('send-message', payload);
+  // Queue-safe emit (works even if socket reconnects)
+  SocketService.emit('send-message', payload);
 
   return true;
 }
+
 
 
 
@@ -854,7 +815,7 @@ async addMessage() {
       from: this.authUser.id,
       to: this.user.id,
       text: this.messageText,
-      state: 'sending',
+      state: 'sent',
       image: imageUrl,  // Now it’s a string URL, not SafeUrl
       type: this.productId ? 'product' : 'friend',
       productId: this.productId || null,
@@ -867,7 +828,7 @@ async addMessage() {
     this.scrollToBottom();
 
     // ✅ STEP 4: Send message via socket
-    const sendSuccess = await this.sendMessage(message, this.index++);
+    const sendSuccess = await this.sendMessage(message);
     if (sendSuccess) {
       // ✅ STEP 5: Clear form
       this.messageText = "";
@@ -957,24 +918,19 @@ private convertBase64ToFile(base64String: string, filename: string): File {
 
 
 
-  allowToShowDate(ind: number): boolean {
-    const currDate = {
-      year: this.messages[ind].createdAt.toJSON().slice(0, 4),
-      month: this.messages[ind].createdAt.toJSON().slice(5, 7),
-      day: this.messages[ind].createdAt.toJSON().slice(8, 10)
-    };
-    if (ind) {
-      const lastDate = {
-        year: this.messages[ind].createdAt.toJSON().slice(0, 4),
-        month: this.messages[ind].createdAt.toJSON().slice(5, 7),
-        day: this.messages[ind].createdAt.toJSON().slice(8, 10)
-      };
+allowToShowDate(ind: number): boolean {
+  if (ind === 0) return true;
 
-      return currDate.day != lastDate.day || currDate.month != lastDate.month
-          || currDate.year != lastDate.year;
-    }
-    return true;
-  }
+  const toYMD = (d: any) => {
+    const dt = new Date(d);
+    const m = String(dt.getMonth() + 1).padStart(2, '0');
+    const day = String(dt.getDate()).padStart(2, '0');
+    return `${dt.getFullYear()}-${m}-${day}`;
+  };
+
+  return toYMD(this.messages[ind].createdAt) !== toYMD(this.messages[ind - 1].createdAt);
+}
+
 
   conversationStarted() {
     return (this.allowToChat || (this.messages && (this.messages.length <= 1 || this.messages.filter(msg => !msg.isMine(this.authUser.id)).length > 0)));
@@ -1078,7 +1034,7 @@ showUproduct() {
     if (!this.socket) {
       console.warn("⚠️ WebSocket is not ready. Trying to reinitialize...");
       if (this.user?.id) {
-        await this.initializeSocket(this.user.id);
+        await this.initializeSocket();
       } else {
         console.error("❌ Cannot reinitialize WebSocket: User ID missing.");
         return;
@@ -1103,41 +1059,48 @@ showUproduct() {
     await alert.present();
   }
   
-  private async sendVideoCallRequest() {
-    const videoCallMessage = new Message();
-    videoCallMessage.id = this.index.toString();
-    videoCallMessage.from = this.authUser.id;
-    videoCallMessage.to = this.user.id;
-    videoCallMessage.text = `${this.authUser.fullName} has requested a video call.`;
-    videoCallMessage.state = 'sending';
-    videoCallMessage.createdAt = new Date();
-    videoCallMessage.type = 'video-call-request';
+private async sendVideoCallRequest() {
+  const videoCallMessage = new Message();
+  videoCallMessage.id = this.index.toString();
+  videoCallMessage.from = this.authUser.id;
+  videoCallMessage.to = this.user.id;
+  videoCallMessage.text = `${this.authUser.fullName} has requested a video call.`;
+  videoCallMessage.state = 'sending';
+  videoCallMessage.createdAt = new Date();
+  videoCallMessage.type = 'video-call-request';
 
-    // Add locally
-    this.messages.push(new Message().initialize(videoCallMessage));
-    this.groupMessagesByDate();
-    this.scrollToBottom();
+  this.messages.push(new Message().initialize(videoCallMessage));
+  this.groupMessagesByDate();
+  this.scrollToBottom();
 
-    // Only send what backend expects
-    this.socket.emit('video-call-request', {
-      from: this.authUser.id,
-      to: this.user.id,
-      text: videoCallMessage.text,
-      messageId: videoCallMessage.id
-    }, (ack) => {
+  const payload = {
+    from: this.authUser.id,
+    to: this.user.id,
+    text: videoCallMessage.text,
+    messageId: videoCallMessage.id,
+  };
+
+  if (this.socket?.connected) {
+    // keep ack when possible
+    this.socket.emit('video-call-request', payload, (ack) => {
       if (ack?.success) {
-        const messageIndex = this.messages.findIndex(m => m.id === videoCallMessage.id);
-        if (messageIndex !== -1) {
-          this.messages[messageIndex].state = 'sent';
+        const i = this.messages.findIndex(m => m.id === videoCallMessage.id);
+        if (i !== -1) {
+          this.messages[i].state = 'sent';
           this.groupMessagesByDate();
         }
       } else {
-        console.error("Video call request failed:", ack?.error);
+        console.error('Video call request failed:', ack?.error);
       }
     });
-    
-    this.index++;
+  } else {
+    // offline-safe emit (no ack)
+    SocketService.emit('video-call-request', payload);
+  }
+
+  this.index++;
 }
+
 
   
   

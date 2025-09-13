@@ -63,7 +63,7 @@ export class JobComponent implements OnInit {
     } else {
       console.log('User data not found in localStorage');
       this.toastService.presentStdToastr('User data not found. Please log in again.');
-      this.router.navigateByUrl('/login');
+      this.router.navigateByUrl('/auth/signin');
     }
   }
 

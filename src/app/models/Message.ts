@@ -20,7 +20,9 @@ export class Message {
   initialize(message: any) {
     console.log('Initializing message:', message);
 
-    this.id = message._id;
+    this._id = message._id;
+    (this as any).id = message._id;  // Force id to exist at top level
+
     this.from = message.from;
     this.to = message.to;
     this.text = message.text;
