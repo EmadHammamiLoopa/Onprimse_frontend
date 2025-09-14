@@ -27,29 +27,35 @@
     </div>
 
     <!-- Video call buttons -->
-    <ion-buttons slot="end">
-      <ion-button *ngIf="!user?.isFriend && canRequestVideoCall()" (click)="requestVideoCall()" shape="round" fill="clear" class="video-button hover-pop pulse-icon" style="position: relative;">
-        <ion-icon name="videocam-outline" size="large"></ion-icon>
-        <div style="
-          position: absolute;
-          top: 2px;
-          right: 2px;
-          background: var(--ion-color-danger);
-          color: white;
-          font-size: 10px;
-          border-radius: 50%;
-          width: 16px;
-          height: 16px;
-          display: flex;
-          justify-content: center;
-          align-items: center;
-        ">?</div>
-      </ion-button>
+<!-- header video button -->
+<ion-buttons slot="end">
+  <!-- Non-friend button -->
+  <ion-button *ngIf="!user?.isFriend && canRequestVideoCall()"
+              (click)="onVideoButtonPressed()"
+              shape="round" fill="clear" class="video-button hover-pop pulse-icon"
+              style="position:relative">
 
-      <ion-button *ngIf="user?.isFriend" [routerLink]="['/messages/video', user?.id]" shape="round" fill="clear" class="video-button hover-pop">
-        <ion-icon name="videocam"></ion-icon>
-      </ion-button>
-    </ion-buttons>
+    <!-- outline until accepted -->
+    <ion-icon [name]="activeVideoCall.status === 'accepted' ? 'videocam' : 'videocam-outline'"
+              size="large"></ion-icon>
+
+    <!-- show ? for non-friends unless accepted -->
+    <div *ngIf="activeVideoCall.status !== 'accepted'"
+         style="position:absolute;top:2px;right:2px;background:var(--ion-color-danger);color:#fff;font-size:10px;border-radius:50%;width:16px;height:16px;display:flex;justify-content:center;align-items:center;">
+      ?
+    </div>
+  </ion-button>
+
+  <!-- Friend button (never shows ?) -->
+  <ion-button *ngIf="user?.isFriend"
+              [routerLink]="['/messages/video', user?.id]"
+              shape="round" fill="clear" class="video-button hover-pop">
+    <ion-icon name="videocam"></ion-icon>
+  </ion-button>
+</ion-buttons>
+
+
+
 
   </ion-toolbar>
 </ion-header>
@@ -107,33 +113,65 @@
           </div>
           
           <!-- Video call request -->
-          <div *ngIf="message?.type === 'video-call-request'">
-  
-            <!-- IF message sent by me -->
-            <div *ngIf="message?.from === authUser?.id" class="video-call-request improved-request">
-              <ion-icon name="videocam" class="video-icon"></ion-icon>
-              <div class="request-text">
-                <strong>Video Call Request</strong><br />
-                {{ message?.text }}
-              </div>
-            </div>
-          
-            <!-- IF message received -->
-            <div *ngIf="message?.from !== authUser?.id" class="video-call-request fancy-request">
-              <div class="video-icon-container">
-                <ion-icon name="videocam" class="video-icon pulse"></ion-icon>
-              </div>
-              <div class="request-text">
-                <strong>Incoming Video Call</strong><br />
-                {{ message?.text }}
-                <div class="action-buttons">
-                  <ion-button fill="outline" size="small" color="success" (click)="acceptVideoCall(message)">
-                    Accept
-                  </ion-button>
-                </div>
-              </div>
-            </div>
-          </div>
+<!-- IF message sent by me -->
+<!-- IF message sent by me -->
+<!-- Video Call Request Message -->
+<div *ngIf="message?.type === 'video-call-request'" 
+     class="video-call-request"
+     [ngClass]="{ 'improved-request': message?.from === authUser?.id,
+                  'fancy-request': message?.from !== authUser?.id }">
+
+  <!-- Icon -->
+  <div class="video-icon-container" *ngIf="message?.from !== authUser?.id">
+    <ion-icon name="videocam" class="video-icon pulse"></ion-icon>
+  </div>
+  <ion-icon *ngIf="message?.from === authUser?.id" name="videocam" class="video-icon"></ion-icon>
+
+  <!-- Request text -->
+  <div class="request-text">
+    <strong>
+      {{ message?.from === authUser?.id ? 'Video Call Request' : 'Incoming Video Call' }}
+    </strong><br />
+    {{ message?.text }}
+
+    <!-- Pending: buttons -->
+<!-- Pending: buttons -->
+<!-- actions are shown only for the latest pending request, during this session -->
+<div class="action-buttons" *ngIf="isActionableCall(message)">
+  <ion-button *ngIf="message?.from !== authUser?.id"
+              fill="outline" size="small" color="success"
+              (click)="acceptVideoCall(message)">
+    Accept
+  </ion-button>
+
+  <ion-button fill="outline" size="small" color="danger"
+              (click)="cancelVideoCallRequest(message)">
+    Cancel
+  </ion-button>
+</div>
+
+
+    <!-- Accepted: resolved text -->
+    <div *ngIf="message?.status === 'accepted'" class="resolved-text">
+      <ng-container *ngIf="message?.from === authUser?.id">
+        ✅ Accepted by {{ user?.fullName }}
+      </ng-container>
+      <ng-container *ngIf="message?.from !== authUser?.id">
+        ✅ You accepted the call
+      </ng-container>
+    </div>
+
+    <!-- Cancelled: resolved text -->
+    <div *ngIf="message?.status === 'cancelled'" class="resolved-text">
+      <ng-container *ngIf="message?.from === authUser?.id">
+        ❌ You cancelled the request
+      </ng-container>
+      <ng-container *ngIf="message?.from !== authUser?.id">
+        ❌ {{ user?.fullName }} cancelled the request
+      </ng-container>
+    </div>
+  </div>
+</div>
 
           
           <!-- Message metadata -->

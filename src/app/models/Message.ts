@@ -4,6 +4,8 @@ import { Product } from './Product';
 
 export class Message {
   public _id: string;
+  public tempId?: string;   // ✅ add this for optimistic messages
+
   private _from: string;
   private _to: string;
   private _text: string;
@@ -11,17 +13,20 @@ export class Message {
   private _createdAt: Date;
   private _image: string;
   private _type: string;
+  public   status?: 'pending' | 'accepted' | 'cancelled';
   public productId?: string; // Property to store product ID
-  public product?: Product; // Property to store product details
-  public   safeImage?: SafeUrl;   // sanitized image
+  public product?: Product;  // Property to store product details
+  public safeImage?: SafeUrl; // sanitized image
 
   constructor() {}
 
   initialize(message: any) {
     console.log('Initializing message:', message);
 
-    this._id = message._id;
-    (this as any).id = message._id;  // Force id to exist at top level
+    this._id = message._id || message.id;
+    this.tempId = message.tempId; // ✅ keep tempId if provided
+
+    (this as any).id = this._id;  // Force id to exist at top level
 
     this.from = message.from;
     this.to = message.to;
@@ -30,12 +35,14 @@ export class Message {
     this.image = message.image;
     this.state = message.state;
     this.type = message.type;
+    this.status = message.status || 'pending';
 
     // Initialize productId and product based on the message type
     if (this.type === 'product') {
-      this.productId = message.productId || null; // Ensure productId is assigned even if undefined
-      // Assuming `message.product` can be directly used to initialize `Product`
-      this.product = message.product ? new Product().initialize(message.product) : null;
+      this.productId = message.productId || null;
+      this.product = message.product
+        ? new Product().initialize(message.product)
+        : null;
     } else {
       this.productId = null;
       this.product = null;
@@ -90,28 +97,20 @@ export class Message {
   set image(image: any) {
     if (!image || image === 'undefined' || image === 'null') {
       this._image = null;
-  
     } else if (typeof image === 'string') {
       if (image.startsWith('data:image/')) {
-        // ✅ Keep base64 images as-is
-        this._image = image;
+        this._image = image; // base64
       } else if (image.startsWith('http')) {
-        // ✅ Already a valid URL
-        this._image = image;
+        this._image = image; // full URL
       } else {
-        // ✅ Relative path from backend
         this._image = constants.DOMAIN_URL + image;
       }
-  
     } else if (typeof image === 'object' && image.path) {
       this._image = constants.DOMAIN_URL + image.path;
-  
     } else {
       this._image = null;
     }
   }
-  
-  
   set type(type: string) {
     this._type = type;
   }

@@ -22,6 +22,8 @@ import { FilePath } from '@ionic-native/file-path/ngx';
 import { NgZone } from '@angular/core';
 import { AppEventsService } from 'src/app/services/app-events.service';
 
+
+
 interface ImageFileObject {
   file: File;
   imageData: string;
@@ -48,6 +50,10 @@ export class ChatComponent implements OnInit {
   resend = [];
   product: Product;
   productId: string;
+inSession = true;
+sessionStart = 0;
+
+private loadingMessages = false;
 
   sentMessages = {};
   index = 0;
@@ -75,6 +81,7 @@ export class ChatComponent implements OnInit {
   allowToChat = false;
   business = false;
   showMediaOptions: boolean = false;
+activeVideoCall: { status: 'pending' | 'accepted' | 'cancelled' | null, messageId?: string } = { status: null };
 
 
   
@@ -87,6 +94,52 @@ export class ChatComponent implements OnInit {
                 
   }
 
+ionViewWillLeave() {
+  // tell server to cancel any pendings in this thread
+  if (this.socket?.connected && this.user?.id) {
+    this.socket.emit('leave-chat', { withUser: this.user.id });
+  }
+  this.teardownCallSession();
+}
+
+
+private teardownCallSession() {
+  this.inSession = false;
+  this.sessionStart = 0;
+  this.activeVideoCall = { status: null, messageId: undefined };
+
+  // cancel any still-pending requests (UI + notify peer)
+  const pendings = this.messages.filter(m => m.type === 'video-call-request' && m.status === 'pending');
+  for (const m of pendings) {
+    const realId = (m as any)._id || m.id;
+    const other = m.from === this.authUser.id ? m.to : m.from;
+    if (this.socket && realId) {
+      this.socket.emit('video-call-cancelled', {
+        from: this.authUser.id,
+        to: other,
+        messageId: realId,
+        status: 'cancelled'
+      });
+    }
+    (m as any).busy = false;
+    m.status = 'cancelled';
+  }
+
+  this.recomputeActiveCall();
+  this.changeDetection.detectChanges();
+}
+
+isActionableCall(m: Message): boolean {
+  return this.inSession
+      && m.type === 'video-call-request'
+      && m.status === 'pending'
+      && this.isLatestCall(m);
+}
+
+isLatestCall(message: Message): boolean {
+  const last = [...this.messages].filter(m => m.type === 'video-call-request').pop();
+  return !!last && (last.id === message.id || (last as any)._id === (message as any)._id);
+}
   ngOnInit() {
     console.log("ngOnInit called");
     this.getAuthUser();
@@ -114,6 +167,18 @@ export class ChatComponent implements OnInit {
 
   }
   
+  private async ensureRealId(m: Message, timeout = 5000): Promise<string|null> {
+  if ((m as any)._id) return (m as any)._id;
+  const start = Date.now();
+  return new Promise(resolve => {
+    const iv = setInterval(() => {
+      const cur = this.messages.find(x => x.tempId === m.tempId || x.id === m.id);
+      if (cur && (cur as any)._id) { clearInterval(iv); return resolve((cur as any)._id); }
+      if (Date.now() - start > timeout) { clearInterval(iv); return resolve(null); }
+    }, 100);
+  });
+}
+
   private setupActivityTracking() {
     // Remove any existing listeners first
     this.removeActivityListeners();
@@ -142,15 +207,23 @@ export class ChatComponent implements OnInit {
     this.activityListeners = [];
   }
   
-  ngOnDestroy() {
-    this.removeActivityListeners();
+ngOnDestroy() {
+  if (this.socket?.connected && this.user?.id) {
+    this.socket.emit('leave-chat', { withUser: this.user.id });
   }
+  this.teardownCallSession();
+  this.removeActivityListeners();
+}
 
   ionViewWillEnter() {
-    console.log("ionViewWillEnter called");
+  this.inSession = true;
+  this.sessionStart = Date.now();
+  this.activeVideoCall = { status: null, messageId: undefined }
+  
+  console.log("ionViewWillEnter called");
     this.badges.reset('messages');
 
-    this.pageLoading = true;
+    //this.pageLoading = true;
     this.getUserId();
     if (this.authUser && this.authUser.id) {
       this.route.paramMap.subscribe(params => {
@@ -205,22 +278,34 @@ export class ChatComponent implements OnInit {
   }
 
   
-  acceptVideoCall(message: Message) {
-    SocketService.emit('video-call-accepted', {
-      from: this.authUser.id,
-      to: message.from,
-      messageId: message.id
-    });
-    this.user.isFriend = true;
-  }
-  
-  declineVideoCall(message: Message) {
-    SocketService.emit('video-call-declined', {
-      from: this.authUser.id,
-      to: message.from,
-      messageId: message.id
-    });
-  }
+async acceptVideoCall(message: Message) {
+  message['busy'] = true;
+  const realId = await this.ensureRealId(message);
+  if (!realId) { message['busy'] = false; return this.toastService.presentStdToastr('Still preparing… try again'); }
+
+  const other = message.from === this.authUser.id ? message.to : message.from;
+  this.socket.emit('video-call-accepted', {
+    from: this.authUser.id,
+    to: other,
+    messageId: realId,
+    status: 'accepted'
+  });
+}
+
+async cancelVideoCallRequest(message: Message) {
+  message['busy'] = true;
+  const realId = await this.ensureRealId(message);
+  if (!realId) { message['busy'] = false; return this.toastService.presentStdToastr('Still preparing… try again'); }
+
+  const other = message.from === this.authUser.id ? message.to : message.from;
+  this.socket.emit('video-call-cancelled', {
+    from: this.authUser.id,
+    to: other,
+    messageId: realId,
+    status: 'cancelled'
+  });
+}
+
 
   
   formatLastSeen(lastActive: Date): string {
@@ -298,8 +383,17 @@ getUserProfile(userId: string) {
   console.log('Fetching profile for user ID:', userId);
   this.userService.getUserProfile(userId).subscribe(
     async (resp: any) => {
-      const raw = resp?.data ?? resp;                         // unchanged
-      if (!raw) {                                             // unchanged
+      const raw = resp?.data ?? resp;
+
+      // 🚫 Guard: backend accidentally returned self
+      if (raw?.id === this.authUser?.id && userId !== this.authUser.id) {
+        console.warn('⚠️ Backend returned self instead of friend, skipping.');
+        this.pageLoading = false;
+        this.toastService.presentStdToastr('Sorry, this user is not available');
+        return this.location.back();
+      }
+
+      if (!raw) {
         this.pageLoading = false;
         this.toastService.presentStdToastr('Sorry, this user is not available');
         return this.location.back();
@@ -308,17 +402,30 @@ getUserProfile(userId: string) {
       this.user = new User().initialize(raw);
       console.log('Recipient stored:', this.user);
 
-      /* 🆕  wait until authUser is ready, then load only once */
       await waitUntil(() => !!this.authUser?.id);
-      if (!this.messages.length) this.getMessages();          // prevents duplicate loads
+
+      
+      if (!this.messages.length) {
+        await this.getMessages();
+      } else {
+  this.pageLoading = false;             // ✅ prevent lingering loader when messages already exist
+}
+
     },
-    err => {                                                  // unchanged
+    err => {
       this.pageLoading = false;
-      this.toastService.presentStdToastr('Sorry, this user is not available');
+
+      if (err.status === 403 || err.status === 404) {
+        this.toastService.presentStdToastr('This user is not available anymore');
+        return this.location.back();
+      }
+
+      this.toastService.presentStdToastr('Error loading user profile');
       this.location.back();
     }
   );
 }
+
 
   
   
@@ -417,70 +524,47 @@ formatMessageTime(date: Date | string): string {
     }, 100);
   }
 
-  async getMessages(event?) {
-    if (!this.socket) {
-      console.warn("⚠️ WebSocket is not ready. Trying to reinitialize...");
-      if (this.user?.id) {
-        await this.initializeSocket();
-      } else {
-        console.error("❌ Cannot reinitialize WebSocket: User ID missing.");
-        return;
-      }
-    }
-  
-    if (this.pageLoading) {
-      console.warn("⚠️ Already loading messages, skipping request.");
-      this.pageLoading = false;
-      return;
-    }
-    
-    this.pageLoading = true;
-    console.log("📩 Fetching messages...");
-  
-    try {
-      const resp: any = await this.messageService.indexMessages(this.user?.id || this.productId, this.page++);
-      
-      if (!resp.data?.messages?.length) {
-        console.log("✅ No new messages found.");
-        this.pageLoading = false;
-        return;
-      }
-      if (this.page === 1) this.markThreadRead();
-
-      // Ensure no duplicate messages are pushed
-      const newMessages = resp.data.messages.map(msg => {
-        if (msg.image && typeof msg.image === 'object' && msg.image.path) {
-          msg.image = msg.image.path;
-        }
-        return new Message().initialize(msg);
-      });
-      const existingMessageIds = new Set(this.messages.map(msg => msg.id));
-  
-      newMessages.forEach(msg => {
-        if (!existingMessageIds.has(msg.id)) {
-          this.messages.unshift(msg);
-        }
-      });
-  
-      // Group messages after updating
-      this.groupMessagesByDate();
-      
-      console.log(`✅ Messages loaded: ${this.messages.length}`);
-      this.pageLoading = false;
-  
-      if (!resp.data.more) {
-        this.infScroll.disabled = true;
-      }
-  
-      if (event) {
-        event.target.complete();
-      }
-    } catch (error) {
-      console.error("❌ Error loading messages:", error);
-      this.toastService.presentStdToastr(error);
-    }
+async getMessages(event?) {
+  if (this.loadingMessages) {
+    event?.target?.complete?.();
+    return;
   }
-  
+
+  this.loadingMessages = true;
+  if (!event) this.pageLoading = true;
+
+  try {
+    if (!this.socket) {
+      if (this.user?.id) await this.initializeSocket();
+      else throw new Error('Socket not ready and no user id yet');
+    }
+
+    const resp: any = await this.messageService.indexMessages(this.user?.id || this.productId, this.page++);
+
+    if (resp?.data?.messages?.length) {
+      const newMessages = resp.data.messages.map(m => {
+        if (m.image && typeof m.image === 'object' && m.image.path) m.image = m.image.path;
+        return new Message().initialize(m);
+      });
+
+      const seen = new Set(this.messages.map(m => m.id));
+      newMessages.forEach(m => { if (!seen.has(m.id)) this.messages.unshift(m); });
+
+      if (this.page === 1) this.markThreadRead();
+      this.groupMessagesByDate();
+      this.recomputeActiveCall();
+      if (!resp.data.more && this.infScroll) this.infScroll.disabled = true;
+    }
+  } catch (err) {
+    console.error('❌ getMessages error:', err);
+    this.toastService.presentStdToastr('Failed to load messages');
+  } finally {
+    this.loadingMessages = false;   // ✅ always release lock
+    this.pageLoading = false;       // ✅ always hide overlay
+    event?.target?.complete?.();
+  }
+}
+
   
   
   
@@ -491,7 +575,30 @@ formatMessageTime(date: Date | string): string {
   }
   
 
-  
+
+// helper: recompute the header state, but ignore calls from earlier sessions
+private recomputeActiveCall() {
+  const last = [...this.messages]
+    .filter(m => m.type === 'video-call-request')
+    .sort((a, b) => +new Date(a.createdAt) - +new Date(b.createdAt))
+    .pop();
+
+  if (!last) {
+    this.activeVideoCall = { status: null, messageId: undefined };
+    return;
+  }
+
+  const lastTs = +new Date(last.createdAt);
+  const isThisSession = !!this.sessionStart && lastTs >= this.sessionStart;
+
+  this.activeVideoCall = isThisSession
+    ? { status: (last.status as any) ?? 'pending', messageId: last.id }
+    : { status: null, messageId: undefined };
+}
+
+
+
+
   
 
   getFriendInfo(friendId: string) {
@@ -520,48 +627,120 @@ formatMessageTime(date: Date | string): string {
     this.listenersBound = true;
   
     // helper to normalize any message payload
-    const normalize = (m: any): Message => {
-      const copy: any = { ...m };
-      copy.id = copy.id || copy._id || `${copy.from}-${copy.to}-${copy.createdAt || Date.now()}`;
-      copy.createdAt = copy.createdAt ? new Date(copy.createdAt) : new Date();
-      if (copy.image && typeof copy.image === 'object' && copy.image.path) {
-        copy.image = copy.image.path;
-      }
-      return new Message().initialize(copy);
-    };
-  
-    this.socket.on('new-message', (raw: any) => {
-      this.zone.run(() => {
-        try {
-          if (typeof raw === 'string') raw = JSON.parse(raw);
-          const msg = normalize(raw);
-  
-          // (optional) only show messages for this thread
-          if (this.user && (msg.from === this.user.id || msg.to === this.user.id)) {
-            // ✅ ensure server/client know it’s read
-            this.markThreadRead();
-          }
-            
-          if (this.messages.some(m => m.id === msg.id)) return; // dedupe
-  
-          this.messages.push(msg);
-          this.groupMessagesByDate();
-          this.scrollToBottom();
-        } catch (e) {
-          console.error('Failed to process incoming message:', e, raw);
+const normalize = (m: any): Message => {
+  const copy: any = { ...m };
+  copy.id = copy.id || copy._id || `${copy.from}-${copy.to}-${copy.createdAt || Date.now()}`;
+  copy.tempId = copy.tempId ?? m.tempId;     // ⬅️ keep tempId for replacement
+  copy.createdAt = copy.createdAt ? new Date(copy.createdAt) : new Date();
+  if (copy.image && typeof copy.image === 'object' && copy.image.path) {
+    copy.image = copy.image.path;
+  }
+
+    if (copy.type !== 'video-call-request') {
+    copy.status = null;
+  }
+
+  return new Message().initialize(copy);
+};
+
+
+  this.socket.on('video-session-reset', () => {
+    this.zone.run(() => {
+      this.messages.forEach(m => {
+        if (m.type === 'video-call-request' && m.status === 'pending') {
+          m.status = 'cancelled';
+          (m as any).busy = false;
         }
       });
+      this.recomputeActiveCall();
+      this.changeDetection.detectChanges();
     });
+  });
+
   
-    this.socket.on('message-sent', (saved: any) => {
-      this.zone.run(() => {
-        const msg = normalize({ ...saved, id: saved._id || saved.id, state: 'sent' });
-        const i = this.messages.findIndex(m => m.id === msg.id);
-        if (i !== -1) this.messages[i] = msg;
-        else this.messages.push(msg);
-        this.groupMessagesByDate();
-      });
+this.socket.on('new-message', (raw: any) => {
+  this.zone.run(() => {
+    try {
+      if (typeof raw === 'string') raw = JSON.parse(raw);
+      const msg = normalize(raw);
+
+      if (this.user && (msg.from === this.user.id || msg.to === this.user.id)) {
+        this.markThreadRead();
+      }
+      if (this.messages.some(m => m.id === msg.id)) return;
+
+      this.messages.push(msg);
+      if (msg.type === 'video-call-request') this.recomputeActiveCall(); // <— add
+      this.groupMessagesByDate();
+      this.scrollToBottom();
+    } catch (e) {
+      console.error('Failed to process incoming message:', e, raw);
+    }
+  });
+});
+
+  
+this.socket.on('message-sent', (saved: any) => {
+  this.zone.run(() => {
+    const msg = normalize({
+      ...saved,
+      id: saved._id || saved.id,
+      _id: saved._id || saved.id,
+      state: 'sent'
     });
+
+    if (saved.tempId) {
+      const i = this.messages.findIndex(m => m.id === saved.tempId || m.tempId === saved.tempId);
+      if (i !== -1) this.messages[i] = msg; else this.messages.push(msg);
+    } else {
+      const idx = this.messages.findIndex(m => m.id === msg.id);
+      if (idx !== -1) this.messages[idx] = msg; else this.messages.push(msg);
+    }
+
+    if (msg.type === 'video-call-request') this.recomputeActiveCall(); // <— add
+
+    this.groupMessagesByDate();
+    this.changeDetection.detectChanges();
+  });
+});
+
+
+
+
+// in accepted/cancelled listeners:
+this.socket.on('video-call-accepted', (data) => {
+  this.zone.run(() => {
+    const msg = this.messages.find(m => m.id === data.messageId || m.tempId === data.messageId);
+    if (msg) {
+      msg.status = 'accepted';
+      msg['busy'] = false;
+      this.recomputeActiveCall();
+      this.groupMessagesByDate();
+      this.recomputeActiveCall(); // <— add here too
+
+      this.changeDetection.detectChanges();
+    }
+  });
+});
+
+this.socket.on('video-call-cancelled', (data) => {
+  this.zone.run(() => {
+    const msg = this.messages.find(m => m.id === data.messageId || m.tempId === data.messageId);
+    if (msg) {
+      msg.status = 'cancelled';
+      msg['busy'] = false;
+      this.recomputeActiveCall();
+      this.groupMessagesByDate();
+      this.changeDetection.detectChanges();
+    }
+  });
+});
+
+
+
+
+
+
   
     this.socket.on('user-status-changed', (data: any) => {
       this.zone.run(() => {
@@ -575,59 +754,63 @@ formatMessageTime(date: Date | string): string {
       });
     });
   
-    this.socket.on('incoming-video-call', (data: any) => {
-      this.zone.run(() => {
-        const msg = normalize({
-          id: data.messageId,
-          from: data.from,
-          to: data.to,
-          text: data.text,
-          type: 'video-call-request',
-          createdAt: new Date(),
-          state: 'sent'
-        });
-        this.handleIncomingVideoCall(msg);
-      });
-    });
+
+
   }
-  
-  
-  private handleIncomingVideoCall(message: Message) {
-    if (message.from === this.authUser.id) {
-      console.log("Ignoring own video call request");
-      return;
-    }
-  
-    this.messages.push(new Message().initialize(message));
-    this.groupMessagesByDate();
-    this.scrollToBottom();
+
+getLatestVideoCallStatus(): string | null {
+  const calls = this.messages.filter(m => m.type === 'video-call-request');
+  if (!calls.length) return null;
+  return calls[calls.length - 1].status; // last call's status
+}
+
+hasAcceptedCall(): boolean {
+  return this.getLatestVideoCallStatus() === 'accepted';
+}
+
+hasPendingCall(): boolean {
+  return this.getLatestVideoCallStatus() === 'pending';
+}
+
+hasCancelledCall(): boolean {
+  return this.getLatestVideoCallStatus() === 'cancelled';
+}
+
+
+
+onVideoButtonPressed() {
+  // friends go straight to call UI
+  if (this.user?.isFriend) {
+    return this.router.navigateByUrl('/messages/video/' + this.user.id);
   }
-  
-  
-  private async showVideoCallAlert(message: Message) {
-    const alert = await this.alertController.create({
-      header: 'Video Call Request',
-      message: message.text,
-      buttons: [
-        {
-          text: 'Decline',
-          handler: () => {
-            this.declineVideoCall(message);
-          }
-        },
-        {
-          text: 'Accept',
-          handler: () => {
-            this.acceptVideoCall(message);
-            this.router.navigate(['/messages/video', message.from]);
-          }
-        }
-      ]
-    });
-    await alert.present();
+
+  // non-friends:
+  if (this.activeVideoCall.status === 'accepted') {
+    // already accepted -> jump to call UI
+    return this.router.navigateByUrl('/messages/video/' + this.user.id);
   }
-  
-  
+
+  if (this.activeVideoCall.status === 'pending') {
+    return this.toastService.presentStdToastr('Waiting for a response…');
+  }
+
+  // no active request -> open confirm and send a request
+  this.requestVideoCall();
+}
+
+private handleIncomingVideoCall(message: Message) {
+  if (message.from === this.authUser.id) return; // ignore my own
+
+  // Already pushed by server? don’t duplicate
+  if (!this.messages.some(m => m.id === message.id || m.tempId === message.id)) {
+    this.messages.push(message);
+  }
+
+  this.groupMessagesByDate();
+  this.scrollToBottom();
+}
+
+   
   
 
   resendMessage(message) {
@@ -761,6 +944,7 @@ async sendMessage(message: any /*, ind?: number */): Promise<boolean> {
   // Build final payload (trust message.image which was uploaded in addMessage)
   const payload = {
     id: message.id,
+    tempId: message.tempId,  
     from: this.authUser.id,
     to: this.user.id,
     text: message.text ?? '',
@@ -812,10 +996,11 @@ async addMessage() {
     // ✅ STEP 2: Create final message with real image URL
     const message = {
       id: tempId,
+      tempId,
       from: this.authUser.id,
       to: this.user.id,
       text: this.messageText,
-      state: 'sent',
+      state: 'sending',
       image: imageUrl,  // Now it’s a string URL, not SafeUrl
       type: this.productId ? 'product' : 'friend',
       productId: this.productId || null,
@@ -828,7 +1013,7 @@ async addMessage() {
     this.scrollToBottom();
 
     // ✅ STEP 4: Send message via socket
-    const sendSuccess = await this.sendMessage(message);
+    const sendSuccess = await this.sendMessage({ ...message, tempId });
     if (sendSuccess) {
       // ✅ STEP 5: Clear form
       this.messageText = "";
@@ -1060,46 +1245,48 @@ showUproduct() {
   }
   
 private async sendVideoCallRequest() {
-  const videoCallMessage = new Message();
-  videoCallMessage.id = this.index.toString();
-  videoCallMessage.from = this.authUser.id;
-  videoCallMessage.to = this.user.id;
-  videoCallMessage.text = `${this.authUser.fullName} has requested a video call.`;
-  videoCallMessage.state = 'sending';
-  videoCallMessage.createdAt = new Date();
-  videoCallMessage.type = 'video-call-request';
+  const tempId = `temp-${Date.now()}`;
 
-  this.messages.push(new Message().initialize(videoCallMessage));
+  // 1️⃣ Create optimistic temp message
+  const tempMessage = new Message().initialize({
+    id: tempId,
+    tempId,
+    from: this.authUser.id,
+    to: this.user.id,
+    text: `${this.authUser.fullName} has requested a video call.`,
+    state: 'sending',
+    createdAt: new Date(),
+    type: 'video-call-request',
+    status: 'pending'
+  });
+
+  this.messages.push(tempMessage);
   this.groupMessagesByDate();
+  this.recomputeActiveCall();   
   this.scrollToBottom();
 
+  // 2️⃣ Build payload for backend
   const payload = {
     from: this.authUser.id,
     to: this.user.id,
-    text: videoCallMessage.text,
-    messageId: videoCallMessage.id,
+    text: tempMessage.text,
+    messageId: tempId
   };
 
+  // 3️⃣ Emit to server
   if (this.socket?.connected) {
-    // keep ack when possible
     this.socket.emit('video-call-request', payload, (ack) => {
-      if (ack?.success) {
-        const i = this.messages.findIndex(m => m.id === videoCallMessage.id);
-        if (i !== -1) {
-          this.messages[i].state = 'sent';
-          this.groupMessagesByDate();
-        }
-      } else {
-        console.error('Video call request failed:', ack?.error);
+      if (!ack?.success) {
+        // fallback: mark as failed
+        const i = this.messages.findIndex(m => m.id === tempId);
+        if (i !== -1) this.messages[i].state = 'failed';
       }
     });
   } else {
-    // offline-safe emit (no ack)
     SocketService.emit('video-call-request', payload);
   }
-
-  this.index++;
 }
+
 
 
   
